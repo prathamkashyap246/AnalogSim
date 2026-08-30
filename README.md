@@ -1,6 +1,6 @@
 # Analog Data Commons
 
-A comprehensive platform for aggregating, managing, and analyzing analog circuit simulation data.
+A comprehensive platform for aggregating, managing, and analyzing analog circuit simulations.
 
 ## Vision
 
