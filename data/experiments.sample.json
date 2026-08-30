@@ -1,0 +1,53 @@
+{
+  "version": "0.1.0",
+  "records": [
+    {
+      "record_id": "ana-nmos-001",
+      "category": "analog",
+      "device_or_board": "2N7002 NMOS test board",
+      "effects": [
+        "body_effect",
+        "channel_length_modulation",
+        "hot_electron_effect"
+      ],
+      "conditions": {
+        "temperature_c": 27,
+        "supply_v": 3.3,
+        "vsb_v": 0.2
+      },
+      "inputs": {
+        "vgs_v": 1.8,
+        "vds_v": 1.2
+      },
+      "measured_outputs": {
+        "id_ma": 0.842,
+        "gm_ms": 1.91
+      },
+      "notes": "Bench capture with calibrated DMM and thermal probe."
+    },
+    {
+      "record_id": "dig-fpga-001",
+      "category": "digital",
+      "device_or_board": "Artix-7 prototype board",
+      "effects": [
+        "supply_droop",
+        "temperature_drift"
+      ],
+      "conditions": {
+        "temperature_c": 55,
+        "supply_v": 0.95,
+        "clock_mhz": 120
+      },
+      "inputs": {
+        "module": "counter_chain",
+        "activity_factor": 0.3
+      },
+      "measured_outputs": {
+        "delay_ns": 2.83,
+        "power_mw": 42.7,
+        "timing_slack_ns": -0.12
+      },
+      "notes": "Measured post-route on hardware with on-board monitors."
+    }
+  ]
+}

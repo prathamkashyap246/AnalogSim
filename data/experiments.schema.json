@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnalogSim Experiments Dataset",
+  "type": "object",
+  "required": ["version", "records"],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "record_id",
+          "category",
+          "device_or_board",
+          "effects",
+          "conditions",
+          "inputs",
+          "measured_outputs"
+        ],
+        "properties": {
+          "record_id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["analog", "digital"]
+          },
+          "device_or_board": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["number", "string", "boolean"]
+            }
+          },
+          "inputs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["number", "string", "boolean"]
+            }
+          },
+          "measured_outputs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["number", "string", "boolean"]
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
