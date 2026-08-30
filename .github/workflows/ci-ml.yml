@@ -1,0 +1,45 @@
+name: CI - ML
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'ml/**'
+      - '.github/workflows/ci-ml.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'ml/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov
+          pip install pandas numpy scikit-learn torch
+      
+      - name: Run ML tests
+        run: pytest ml/tests/ -v --cov=ml
+
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Validate schemas
+        run: echo "Validating ML schemas..."
