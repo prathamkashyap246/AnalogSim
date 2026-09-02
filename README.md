@@ -1,6 +1,6 @@
 # AnalogSim
 
-AnalogSim is a starter web prototype for simulating real-world circuit behavior using structured experimental data.
+AnalogSim is a web application prototype for simulating ideal and real-world circuit behavior using structured experimental data.
 
 ## Vision
 
