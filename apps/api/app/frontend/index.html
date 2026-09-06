@@ -303,9 +303,6 @@
     <div class="toptab" data-nav="wizard" onclick="showView('wizard')">Testbench</div>
     <div class="toptab" data-nav="results" onclick="showView('results')">Waveforms</div>
     <div class="toptab" data-nav="circuits" onclick="showView('circuits')">Circuits</div>
-    <div class="toptab">Device library</div>
-    <div class="toptab">Corner sweep</div>
-    <div class="toptab">Datasheets</div>
   </div>
   <div class="top-spacer"></div>
   <button class="launch-btn" onclick="showView('wizard')">Launch a sweep</button>
@@ -490,6 +487,7 @@
       <button class="pill-btn primary" data-tmpl="rc" onclick="selectTemplate('rc')">RC low-pass filter</button>
       <button class="pill-btn" data-tmpl="inverter" onclick="selectTemplate('inverter')">CMOS inverter (VTC)</button>
       <button class="pill-btn" data-tmpl="cs" onclick="selectTemplate('cs')">Common-source amplifier</button>
+      <button class="pill-btn" data-tmpl="netlist" onclick="selectTemplate('netlist')">Netlist Solver (MNA)</button>
     </div>
 
     <div class="frame wizard-frame" style="max-width:640px; margin-bottom:22px;">
@@ -538,6 +536,17 @@
           </div>
         </div>
 
+                <div class="tmpl-fields" id="fields-netlist" style="display:none;">
+          <div class="step-meta">NETLIST SOLVER</div>
+          <h2 class="step-title">SPICE-style netlist</h2>
+          <p class="step-desc">Solved by the real backend MNA solver — validated against ngspice. Format: <code>name node_p node_n value</code></p>
+          <div class="field">
+            <textarea id="netlist_input" rows="6" style="width:100%; font-family: var(--font-mono); font-size: 13px; padding: 9px 11px; background: var(--paper-2); border: 1.5px solid var(--line-strong);">Vin 1 0 5
+R1 1 2 1000
+R2 2 0 2000</textarea>
+          </div>
+          <div id="netlist-error" style="display:none; color: var(--accent); font-family: var(--font-mono); font-size: 12px; margin-top: 8px;"></div>
+        </div>
       </div>
       <div class="wizard-footer">
         <div class="meta-line" id="tmpl-hint">Configure parameters, then simulate.</div>
@@ -643,6 +652,7 @@ async function runSimulation(){
 
   const payload = {
     engine_type: engineType,
+    sweep_param: sweepParam,
     gate_length_nm: getFloatVal("gate_length_nm"),
     gate_width_um: getFloatVal("gate_width_um"),
     tox_nm: getFloatVal("tox_nm"),
@@ -734,6 +744,7 @@ function simulateCircuit(){
   if(currentTemplate === 'rc') simulateRC();
   else if(currentTemplate === 'inverter') simulateInverter();
   else if(currentTemplate === 'cs') simulateCS();
+  else if(currentTemplate === 'netlist') simulateNetlist();
 }
 
 function circuitLayout(xTitle, yTitle, logX){
@@ -876,6 +887,37 @@ function simulateCS(){
   ]);
 }
 
+async function simulateNetlist(){
+  const netlist = document.getElementById('netlist_input').value;
+  const errorDiv = document.getElementById('netlist-error');
+  errorDiv.style.display = 'none';
+
+  try{
+    const response = await fetch("http://127.0.0.1:8000/api/v1/solve_circuit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ netlist: netlist })
+    });
+    const data = await response.json();
+
+    if(!response.ok){
+      errorDiv.textContent = data.detail;
+      errorDiv.style.display = 'block';
+      document.getElementById('circuit-results').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('circuit-plot').innerHTML =
+      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — no waveform to plot.</p>';
+
+    const rows = Object.entries(data.results).map(([k, v]) => [k, v.toFixed(6)]);
+    showCircuitResult('Netlist solver — DC operating point', rows);
+  }
+  catch(err){
+    errorDiv.textContent = "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running.";
+    errorDiv.style.display = 'block';
+  }
+}
 updateWizardUI();
 </script>
 
