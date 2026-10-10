@@ -4,7 +4,6 @@ from sqlalchemy import create_engine, text
 
 
 def check_and_create_database():
-    # Force 127.0.0.1 instead of 'localhost' to bypass IPv6 (::1) translation issues
     base_url = os.environ["DATABASE_URL_ADMIN"]
     engine = create_engine(base_url, isolation_level="AUTOCOMMIT")
 

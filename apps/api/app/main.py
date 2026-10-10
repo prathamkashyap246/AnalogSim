@@ -1,14 +1,13 @@
-from app.engines.circuit import Circuit
-from app.engines.netlist_parser import parse_netlist, NetlistError
-from fastapi import HTTPException
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import database, models
+from app.engines.circuit import Circuit, ConvergenceError
 from app.engines.empirical_engine import run_empirical_engine
 from app.engines.ideal_engine import run_ideal_engine
+from app.engines.netlist_parser import NetlistError, parse_netlist
 from app.engines.non_ideal_engine import run_non_ideal_engine
 
 # Automatically create database tables
@@ -24,8 +23,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class CircuitSolveRequest(BaseModel):
     netlist: str
+
+
 class SimulationRequest(BaseModel):
     sweep_param: str = "vds"
     engine_type: str = "ideal"
@@ -72,6 +74,20 @@ def route_simulation(
             vth0=request.vth0,
         )
 
+    # Persist simulation run into database
+    sim_record = models.SimulationRun(
+        engine_type=request.engine_type,
+        gate_length_nm=request.gate_length_nm,
+        gate_width_um=request.gate_width_um,
+        results_json=results,
+    )
+    db.add(sim_record)
+    db.commit()
+    db.refresh(sim_record)
+
+    return {"simulation_id": sim_record.id, "data": results}
+
+
 @app.post("/api/v1/solve_circuit")
 def solve_circuit(request: CircuitSolveRequest):
     try:
@@ -85,6 +101,12 @@ def solve_circuit(request: CircuitSolveRequest):
 
     try:
         result = circuit.solve()
+    except ConvergenceError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{e}. Check that every MOSFET has a DC path to its supplies, "
+            f"or try smaller source voltages.",
+        )
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -92,17 +114,4 @@ def solve_circuit(request: CircuitSolveRequest):
             f"Check for disconnected nodes or conflicting sources.",
         )
 
-    return {"status": "ok", "results": result}
-
-    # Persist simulation run into database
-    sim_record = models.SimulationRun(
-        engine_type=request.engine_type,
-        gate_length_nm=request.gate_length_nm,
-        gate_width_um=request.gate_width_um,
-        results_json=results,
-    )
-    db.add(sim_record)
-    db.commit()
-    db.refresh(sim_record)
-
-    return {"simulation_id": sim_record.id, "data": results}
+    return {"status": "ok", "results": result, "iterations": circuit.last_iterations}

@@ -539,7 +539,7 @@
                 <div class="tmpl-fields" id="fields-netlist" style="display:none;">
           <div class="step-meta">NETLIST SOLVER</div>
           <h2 class="step-title">SPICE-style netlist</h2>
-          <p class="step-desc">Solved by the real backend MNA solver — validated against ngspice. Format: <code>name node_p node_n value</code></p>
+          <p class="step-desc">Solved by the backend MNA solver (Newton-Raphson when MOSFETs are present). Linear elements validated against ngspice. Elements: <code>V</code> <code>I</code> <code>R</code> as <code>name node_p node_n value</code>; MOSFET as <code>M1 drain gate source bulk NMOS|PMOS W=1 L=180</code> (W in µm, L in nm, optional). Node 0 is ground; an <code>I</code> source pushes current from node_p through itself into node_n.</p>
           <div class="field">
             <textarea id="netlist_input" rows="6" style="width:100%; font-family: var(--font-mono); font-size: 13px; padding: 9px 11px; background: var(--paper-2); border: 1.5px solid var(--line-strong);">Vin 1 0 5
 R1 1 2 1000
@@ -910,8 +910,10 @@ async function simulateNetlist(){
     document.getElementById('circuit-plot').innerHTML =
       '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — no waveform to plot.</p>';
 
-    const rows = Object.entries(data.results).map(([k, v]) => [k, v.toFixed(6)]);
-    showCircuitResult('Netlist solver — DC operating point', rows);
+    const rows = Object.entries(data.results).map(([k, v]) =>
+      [k, k.startsWith('I') ? v.toExponential(4) + ' A' : v.toFixed(6) + ' V']);
+    const nr = data.iterations > 1 ? ` (Newton-Raphson, ${data.iterations} iterations)` : '';
+    showCircuitResult('Netlist solver — DC operating point' + nr, rows);
   }
   catch(err){
     errorDiv.textContent = "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running.";

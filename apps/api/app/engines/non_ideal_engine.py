@@ -46,6 +46,22 @@ def calculate_non_ideal_current(vgs, vds, vsb, current_temp, vth0, k_val, mu_tem
     return id_val, gm, gds, vth
 
 
+def mosfet_constants(gate_length_nm, gate_width_um, tox_nm, mu_0, temp_c):
+    """Geometry/temperature constants shared by the sweep engine and the
+    circuit solver: returns (k_val, mu_temp, l_cm)."""
+    eps_ox = 3.9 * 8.854e-14
+    tox_cm = tox_nm * 1e-7
+    c_ox = eps_ox / tox_cm
+
+    w_cm = gate_width_um * 1e-4
+    l_cm = gate_length_nm * 1e-7
+
+    temp_k = temp_c + 273.15
+    mu_temp = mu_0 * ((300.0 / temp_k) ** 1.5)
+    k_val = mu_temp * c_ox * (w_cm / l_cm)
+    return k_val, mu_temp, l_cm
+
+
 def run_non_ideal_engine(
     gate_length_nm: float = 180.0,
     gate_width_um: float = 1.0,
@@ -67,13 +83,6 @@ def run_non_ideal_engine(
     fixed_vsb: float = 0.0,
     temp_c: float = 27.0,
 ) -> Dict[str, Any]:
-    eps_ox = 3.9 * 8.854e-14
-    tox_cm = tox_nm * 1e-7
-    c_ox = eps_ox / tox_cm
-
-    w_cm = gate_width_um * 1e-4
-    l_cm = gate_length_nm * 1e-7
-
     sweep_vec = np.linspace(sweep_start, sweep_end, steps + 1)
 
     vds_list, vgs_list, vsb_list, temp_list = [], [], [], []
@@ -85,9 +94,9 @@ def run_non_ideal_engine(
         vsb = val if sweep_param == "vsb" else fixed_vsb
         current_temp = val if sweep_param == "temp" else temp_c
 
-        temp_k = current_temp + 273.15
-        mu_temp = mu_0 * ((300.0 / temp_k) ** 1.5)
-        k_val = mu_temp * c_ox * (w_cm / l_cm)
+        k_val, mu_temp, l_cm = mosfet_constants(
+            gate_length_nm, gate_width_um, tox_nm, mu_0, current_temp
+        )
 
         id_val, gm, gds, vth = calculate_non_ideal_current(
             vgs, vds, vsb, current_temp, vth0, k_val, mu_temp, l_cm,
