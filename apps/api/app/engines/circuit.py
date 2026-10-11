@@ -226,12 +226,12 @@ class Mosfet:
 
 class Circuit:
     # Newton-Raphson settings (SPICE-like defaults)
-    MAX_ITER = 100
-    VNTOL = 1e-9      # absolute voltage tolerance (V)
-    ABSTOL = 1e-12    # absolute current tolerance (A)
-    RELTOL = 1e-6
-    V_STEP_LIMIT = 0.5  # max node-voltage change per iteration (V)
-    GMIN = 1e-12        # tiny conductance node->ground so cut-off devices never leave a node floating
+    MAX_ITER: int = 100
+    VNTOL: float = 1e-9      # absolute voltage tolerance (V)
+    ABSTOL: float = 1e-12    # absolute current tolerance (A)
+    RELTOL: float = 1e-6
+    V_STEP_LIMIT: float = 0.5  # max node-voltage change per iteration (V)
+    GMIN: float = 1e-12        # tiny conductance node->ground so cut-off devices never leave a node floating
 
     def __init__(self):
         self.elements: List = []

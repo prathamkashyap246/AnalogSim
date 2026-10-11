@@ -16,6 +16,13 @@ from app.engines.non_ideal_engine import calculate_non_ideal_current, mosfet_con
 failures = 0
 
 
+def parse_dc(netlist):
+    """Parse a netlist that must contain a .dc line and return the sweep."""
+    _, dc = parse_netlist_with_directives(netlist)
+    assert dc is not None, "netlist has no .dc directive"
+    return dc
+
+
 def check(label, actual, expected, tol=1e-6):
     global failures
     ok = abs(actual - expected) <= tol
@@ -134,6 +141,7 @@ for label, text in (("duplicate name", "R1 1 0 100\nR1 1 2 100"),
 # --- 8. .dc sweep -------------------------------------------------------------
 def sweep(netlist):
     elements, dc = parse_netlist_with_directives(netlist)
+    assert dc is not None, "netlist has no .dc directive"
     c = Circuit()
     for el in elements:
         c.add(el)
@@ -148,10 +156,10 @@ def flag(label, ok):
 
 
 # 8a. parser: point counts, direction, canonical source name
-dc = parse_netlist_with_directives("Vin 1 0 0\nR1 1 0 1\n.dc VIN 0 1.8 0.05")[1]
+dc = parse_dc("Vin 1 0 0\nR1 1 0 1\n.dc VIN 0 1.8 0.05")
 flag("parse .dc: 37 points from 0 to 1.8", len(dc.values()) == 37 and dc.values()[0] == 0.0 and dc.values()[-1] == 1.8)
 flag("parse .dc: source name taken from the element line (VIN -> Vin)", dc.source == "Vin")
-dc = parse_netlist_with_directives("Vin 1 0 0\nR1 1 0 1\n.dc Vin 1 0 -0.25")[1]
+dc = parse_dc("Vin 1 0 0\nR1 1 0 1\n.dc Vin 1 0 -0.25")
 flag("parse .dc: downward sweep 1 -> 0 gives 5 points", dc.values() == [1.0, 0.75, 0.5, 0.25, 0.0])
 for label, text in (("unknown source", ".dc Vx 0 1 0.1"), ("resistor as source", ".dc R1 0 1 0.1"),
                     ("zero step", ".dc Vin 0 1 0"), ("wrong-sign step", ".dc Vin 0 1 -0.1"),
@@ -173,6 +181,7 @@ check("linear divider sweep, worst error over 11 points", err, 0.0, 1e-9)
 
 # 8c. source value restored after sweep
 elements, dcs = parse_netlist_with_directives("Vin 1 0 3.3\nR1 1 0 1000\n.dc Vin 0 1 0.5")
+assert dcs is not None
 c = Circuit()
 for el in elements:
     c.add(el)
@@ -217,6 +226,7 @@ check("CS amp Vg sweep vs bisection reference, worst error over 19 points", err,
 
 # 8h. convergence failure names the sweep point
 elements, dcs = parse_netlist_with_directives(INV)
+assert dcs is not None
 c = Circuit()
 for el in elements:
     c.add(el)
