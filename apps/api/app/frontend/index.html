@@ -539,11 +539,15 @@
                 <div class="tmpl-fields" id="fields-netlist" style="display:none;">
           <div class="step-meta">NETLIST SOLVER</div>
           <h2 class="step-title">SPICE-style netlist</h2>
-          <p class="step-desc">Solved by the backend MNA solver (Newton-Raphson when MOSFETs are present). Linear elements validated against ngspice. Elements: <code>V</code> <code>I</code> <code>R</code> as <code>name node_p node_n value</code>; MOSFET as <code>M1 drain gate source bulk NMOS|PMOS W=1 L=180</code> (W in µm, L in nm, optional). Node 0 is ground; an <code>I</code> source pushes current from node_p through itself into node_n.</p>
+          <p class="step-desc">Solved by the backend MNA solver (Newton-Raphson when MOSFETs are present). Linear elements validated against ngspice. Elements: <code>V</code> <code>I</code> <code>R</code> as <code>name node_p node_n value</code>; MOSFET as <code>M1 drain gate source bulk NMOS|PMOS W=1 L=180</code> (W in µm, L in nm, optional). Node 0 is ground; an <code>I</code> source pushes current from node_p through itself into node_n. Add <code>.dc Vin 0 1.8 0.05</code> to sweep a source and plot the result.</p>
           <div class="field">
             <textarea id="netlist_input" rows="6" style="width:100%; font-family: var(--font-mono); font-size: 13px; padding: 9px 11px; background: var(--paper-2); border: 1.5px solid var(--line-strong);">Vin 1 0 5
 R1 1 2 1000
 R2 2 0 2000</textarea>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('inverter')">Example: CMOS inverter sweep</button>
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('cs')">Example: common-source sweep</button>
           </div>
           <div id="netlist-error" style="display:none; color: var(--accent); font-family: var(--font-mono); font-size: 12px; margin-top: 8px;"></div>
         </div>
@@ -741,6 +745,10 @@ function selectTemplate(t){
 }
 
 function simulateCircuit(){
+  const plotDiv = document.getElementById('circuit-plot');
+  try{ Plotly.purge(plotDiv); }catch(e){}
+  plotDiv.innerHTML = '';
+  plotDiv.style.height = '400px';
   if(currentTemplate === 'rc') simulateRC();
   else if(currentTemplate === 'inverter') simulateInverter();
   else if(currentTemplate === 'cs') simulateCS();
@@ -887,6 +895,110 @@ function simulateCS(){
   ]);
 }
 
+const NETLIST_EXAMPLES = {
+  inverter: [
+    '* CMOS inverter: sweep the input and watch the output',
+    'Vdd 1 0 1.8',
+    'Vin 2 0 0',
+    'M1 3 2 0 0 NMOS',
+    'M2 3 2 1 1 PMOS',
+    '.dc Vin 0 1.8 0.05'
+  ].join('\n'),
+  cs: [
+    '* Common-source stage: sweep the gate voltage',
+    'Vdd 1 0 1.8',
+    'Vg 2 0 0',
+    'R1 1 3 5000',
+    'M1 3 2 0 0 NMOS W=2 L=180',
+    '.dc Vg 0 1.8 0.025'
+  ].join('\n')
+};
+
+function loadNetlistExample(name){
+  document.getElementById('netlist_input').value = NETLIST_EXAMPLES[name];
+  document.getElementById('netlist-error').style.display = 'none';
+}
+
+const SWEEP_COLORS = ['#b5541f', '#2f6f6b', '#4a5164', '#8a6d3b', '#7a4e8c', '#3f7cac'];
+
+function renderNetlistSweep(data){
+  const xs = data.sweep.values;
+  const src = data.sweep.source;
+  const xUnit = src[0].toUpperCase() === 'I' ? 'A' : 'V';
+  const xTitle = src + ' (' + xUnit + ')';
+
+  const volt = [], cur = [];
+  Object.entries(data.series).forEach(([k, ys]) => {
+    if(k.startsWith('V(')){
+      // a node that just mirrors the swept voltage source is a straight y = x line; skip it
+      if(xUnit === 'V' && ys.every((y, i) => Math.abs(y - xs[i]) < 1e-9)) return;
+      volt.push([k, ys]);
+    } else if(k.startsWith('Id(')){
+      cur.push([k, ys]);
+    }
+  });
+  if(volt.length === 0){
+    Object.entries(data.series).forEach(([k, ys]) => { if(k.startsWith('V(')) volt.push([k, ys]); });
+  }
+
+  const traces = [];
+  let c = 0;
+  volt.forEach(([k, ys]) => {
+    traces.push({ x: xs, y: ys, name: k, type: 'scatter', mode: 'lines',
+                  line: { color: SWEEP_COLORS[c++ % SWEEP_COLORS.length], width: 2 }, xaxis: 'x', yaxis: 'y' });
+  });
+  cur.forEach(([k, ys]) => {
+    traces.push({ x: xs, y: ys.map(v => v * 1e3), name: k + ' (mA)', type: 'scatter', mode: 'lines',
+                  line: { color: SWEEP_COLORS[c++ % SWEEP_COLORS.length], width: 2 }, xaxis: 'x2', yaxis: 'y2' });
+  });
+
+  const base = circuitLayout(xTitle, 'Voltage (V)', false);
+  let layout;
+  if(cur.length){
+    const common = { tickfont: base.xaxis.tickfont, gridcolor: base.xaxis.gridcolor, zerolinecolor: base.xaxis.zerolinecolor };
+    const ytitle = txt => ({ text: txt, font: base.yaxis.title.font });
+    layout = {
+      margin: { t: 44, r: 20, b: 46, l: 64 },
+      paper_bgcolor: base.paper_bgcolor, plot_bgcolor: base.plot_bgcolor, font: base.font,
+      showlegend: true, legend: { orientation: 'h', y: 1.1 },
+      xaxis:  Object.assign({}, common, { domain: [0, 1], anchor: 'y', matches: 'x2', showticklabels: false }),
+      xaxis2: Object.assign({}, common, { domain: [0, 1], anchor: 'y2', title: base.xaxis.title }),
+      yaxis:  Object.assign({}, common, { domain: [0.58, 1], anchor: 'x', title: ytitle('Voltage (V)') }),
+      yaxis2: Object.assign({}, common, { domain: [0, 0.42], anchor: 'x2', title: ytitle('Drain current (mA)') })
+    };
+  } else {
+    layout = Object.assign({}, base, { margin: { t: 44, r: 20, b: 46, l: 64 }, showlegend: true, legend: { orientation: 'h', y: 1.1 } });
+  }
+
+  const plotDiv = document.getElementById('circuit-plot');
+  plotDiv.style.height = cur.length ? '560px' : '400px';
+  Plotly.newPlot('circuit-plot', traces, layout, { displayModeBar: false, responsive: true });
+
+  const num = v => String(Number(v.toPrecision(6)));
+  const rows = [
+    ['Sweep', src + ' ' + num(data.sweep.start) + ' → ' + num(data.sweep.stop) + ' ' + xUnit],
+    ['Points', String(xs.length)]
+  ];
+  if(data.max_iterations > 1) rows.push(['Newton iterations (max per point)', String(data.max_iterations)]);
+
+  // where a voltage crosses the sweep variable (e.g. inverter switching threshold VM)
+  if(xUnit === 'V'){
+    volt.forEach(([k, ys]) => {
+      for(let i = 0; i < xs.length - 1; i++){
+        const d0 = ys[i] - xs[i], d1 = ys[i + 1] - xs[i + 1];
+        if(d0 * d1 < 0){
+          const xc = xs[i] + (xs[i + 1] - xs[i]) * d0 / (d0 - d1);
+          rows.push([k + ' = ' + src + ' at', xc.toFixed(3) + ' V']);
+          break;
+        }
+      }
+    });
+  }
+
+  const nr = data.max_iterations > 1 ? ' (Newton-Raphson)' : '';
+  showCircuitResult('Netlist solver — DC sweep of ' + src + nr, rows);
+}
+
 async function simulateNetlist(){
   const netlist = document.getElementById('netlist_input').value;
   const errorDiv = document.getElementById('netlist-error');
@@ -907,8 +1019,13 @@ async function simulateNetlist(){
       return;
     }
 
+    if(data.mode === 'dc_sweep'){
+      renderNetlistSweep(data);
+      return;
+    }
+
     document.getElementById('circuit-plot').innerHTML =
-      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — no waveform to plot.</p>';
+      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — add a .dc line to sweep a source and plot it.</p>';
 
     const rows = Object.entries(data.results).map(([k, v]) =>
       [k, k.startsWith('I') ? v.toExponential(4) + ' A' : v.toFixed(6) + ' V']);
@@ -916,7 +1033,10 @@ async function simulateNetlist(){
     showCircuitResult('Netlist solver — DC operating point' + nr, rows);
   }
   catch(err){
-    errorDiv.textContent = "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running.";
+    const unreachable = err instanceof TypeError && /fetch/i.test(err.message);
+    errorDiv.textContent = unreachable
+      ? "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running."
+      : "Unexpected error: " + err.message;
     errorDiv.style.display = 'block';
   }
 }

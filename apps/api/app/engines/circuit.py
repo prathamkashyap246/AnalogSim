@@ -17,11 +17,13 @@ that into the same MNA matrix, and re-solves until the update is tiny.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
 from app.engines.non_ideal_engine import calculate_non_ideal_current, mosfet_constants
+
+
 class ConvergenceError(Exception):
     """Raised when Newton-Raphson fails to converge."""
     pass
@@ -112,6 +114,11 @@ class CurrentSource:
         if n is not None:
             z[n] += self.current
 
+
+# ---------------------------------------------------------------------------
+# Nonlinear element: MOSFET
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Mosfet:
     """
@@ -144,7 +151,7 @@ class Mosfet:
     enable_velocity_saturation: bool = False
 
     is_nonlinear = True
-    _FD_STEP = 1e-6  
+    _FD_STEP = 1e-6  # volts, for the central-difference Jacobian
 
     def __post_init__(self):
         if self.polarity not in ("n", "p"):
@@ -155,6 +162,8 @@ class Mosfet:
 
     def terminals(self):
         return (self.node_d, self.node_g, self.node_s, self.node_b)
+
+    # -- current model ------------------------------------------------------
     def _id_forward(self, vgs: float, vds: float, vsb: float) -> float:
         i, _, _, _ = calculate_non_ideal_current(
             vgs, vds, vsb, self.temp_c, self.vth0, self._k, self._mu_temp,
@@ -162,22 +171,29 @@ class Mosfet:
             self.enable_body_effect, self.enable_clm, self.enable_velocity_saturation,
         )
         return i
+
     def _id_nmos(self, vd: float, vg: float, vs: float, vb: float) -> float:
         # The model assumes vds >= 0. If the "drain" is below the "source"
         # the terminals swap roles (a MOSFET is symmetric) -- same trick SPICE uses.
         if vd >= vs:
             return self._id_forward(vg - vs, vd - vs, vs - vb)
         return -self._id_forward(vg - vd, vs - vd, vd - vb)
+
     def drain_current(self, vd: float, vg: float, vs: float, vb: float) -> float:
         """Current flowing INTO the drain terminal (through the device to the source)."""
         if self.polarity == "p":
             return -self._id_nmos(-vd, -vg, -vs, -vb)
         return self._id_nmos(vd, vg, vs, vb)
+
+    # -- Newton-Raphson companion model ------------------------------------
     def stamp_newton(self, A: np.ndarray, z: np.ndarray, volts: Dict[int, float], node_index: Dict[int, int]) -> None:
         nodes = self.terminals()
         v0 = [volts[n] for n in nodes]
         i0 = self.drain_current(*v0)
 
+        # dId/dV for each of the four terminal voltages (central differences).
+        # Done on the current function itself so the Jacobian is always
+        # consistent with whatever model flags are on.
         h = self._FD_STEP
         grads = []
         for k in range(4):
@@ -203,13 +219,20 @@ class Mosfet:
         if row_s is not None:
             z[row_s] += i_eq
 
+
+# ---------------------------------------------------------------------------
+# Circuit container + MNA assembly/solve
+# ---------------------------------------------------------------------------
+
 class Circuit:
+    # Newton-Raphson settings (SPICE-like defaults)
     MAX_ITER = 100
-    VNTOL = 1e-9      
-    ABSTOL = 1e-12   
+    VNTOL = 1e-9      # absolute voltage tolerance (V)
+    ABSTOL = 1e-12    # absolute current tolerance (A)
     RELTOL = 1e-6
-    V_STEP_LIMIT = 0.5 
-    GMIN = 1e-12        
+    V_STEP_LIMIT = 0.5  # max node-voltage change per iteration (V)
+    GMIN = 1e-12        # tiny conductance node->ground so cut-off devices never leave a node floating
+
     def __init__(self):
         self.elements: List = []
         self.last_iterations: int = 0
@@ -226,7 +249,7 @@ class Circuit:
             if isinstance(el, VoltageSource):
                 source_names.append(el.name)
 
-        nodes.discard(0)  
+        nodes.discard(0)  # ground is not an unknown
         sorted_nodes = sorted(nodes)
 
         node_index = {node: i for i, node in enumerate(sorted_nodes)}
@@ -245,11 +268,16 @@ class Circuit:
             "Id(<mosfet>)" -> drain current of each MOSFET (into the drain)
         The number of Newton iterations used is left in self.last_iterations.
         """
+        return self._solve_full()[0]
+
+    def _solve_full(self, x0: Optional[np.ndarray] = None):
+        """Like solve(), but also returns the raw solution vector and accepts
+        a starting guess x0 for Newton-Raphson (ignored for linear circuits)."""
         sorted_nodes, node_index, extra_index = self._collect_nodes_and_sources()
         size = len(sorted_nodes) + len(extra_index)
 
         if size == 0:
-            return {}
+            return {}, np.zeros(0)
 
         nonlinear = [el for el in self.elements if getattr(el, "is_nonlinear", False)]
         n_nodes = len(sorted_nodes)
@@ -262,7 +290,7 @@ class Circuit:
             x = np.linalg.solve(A, z)
             self.last_iterations = 1
         else:
-            x = self._newton(size, n_nodes, node_index, extra_index, sorted_nodes)
+            x = self._newton(size, n_nodes, node_index, extra_index, sorted_nodes, x0)
 
         result: Dict[str, float] = {}
         for node, i in node_index.items():
@@ -274,7 +302,59 @@ class Circuit:
         for el in nonlinear:
             result[f"Id({el.name})"] = float(el.drain_current(*[volts[n] for n in el.terminals()]))
 
-        return result
+        return result, x
+
+    def dc_sweep(self, source_name: str, values: List[float]):
+        """
+        Solve the operating point once per value of the named V/I source.
+
+        Each point starts Newton-Raphson from the previous point's solution
+        (continuation), which is both faster and more robust than starting
+        from zero every time. If a warm start fails to converge it is retried
+        from zero before giving up. The source's original value is restored
+        afterwards.
+
+        Returns (series, iterations): series maps each result name (e.g. "V(3)")
+        to a list with one entry per sweep value; iterations is a list of the
+        Newton iteration counts per point.
+        """
+        src = next(
+            (e for e in self.elements
+             if isinstance(e, (VoltageSource, CurrentSource)) and e.name.upper() == source_name.upper()),
+            None,
+        )
+        if src is None:
+            raise ValueError(f"No voltage or current source named '{source_name}'")
+        attr = "voltage" if isinstance(src, VoltageSource) else "current"
+        original = getattr(src, attr)
+
+        series: Dict[str, List[float]] = {}
+        iterations: List[int] = []
+        x_prev: Optional[np.ndarray] = None
+        try:
+            for val in values:
+                setattr(src, attr, val)
+                try:
+                    result, x = self._solve_full(x_prev)
+                except ConvergenceError:
+                    if x_prev is None:
+                        raise ConvergenceError(
+                            f"Newton-Raphson did not converge at {src.name} = {val:g}"
+                        ) from None
+                    try:
+                        result, x = self._solve_full(None)
+                    except ConvergenceError:
+                        raise ConvergenceError(
+                            f"Newton-Raphson did not converge at {src.name} = {val:g}"
+                        ) from None
+                x_prev = x
+                iterations.append(self.last_iterations)
+                for key, v in result.items():
+                    series.setdefault(key, []).append(v)
+        finally:
+            setattr(src, attr, original)
+
+        return series, iterations
 
     @staticmethod
     def _volts(x: np.ndarray, sorted_nodes) -> Dict[int, float]:
@@ -283,8 +363,8 @@ class Circuit:
             volts[node] = float(x[i])
         return volts
 
-    def _newton(self, size, n_nodes, node_index, extra_index, sorted_nodes) -> np.ndarray:
-        x = np.zeros(size)
+    def _newton(self, size, n_nodes, node_index, extra_index, sorted_nodes, x0=None) -> np.ndarray:
+        x = np.zeros(size) if x0 is None else np.array(x0, dtype=float)
         abs_tol = np.concatenate([np.full(n_nodes, self.VNTOL), np.full(size - n_nodes, self.ABSTOL)])
 
         for iteration in range(1, self.MAX_ITER + 1):
@@ -301,6 +381,10 @@ class Circuit:
                 A[i, i] += self.GMIN
 
             x_solved = np.linalg.solve(A, z)
+
+            # Limit how far any node voltage may move in one step; the
+            # square-law curve is only locally linear, so a huge jump
+            # (e.g. from a cut-off device) would overshoot badly.
             dx = x_solved - x
             limited = np.abs(dx[:n_nodes]) > self.V_STEP_LIMIT
             if limited.any():

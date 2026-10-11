@@ -7,7 +7,7 @@ from app.db import database, models
 from app.engines.circuit import Circuit, ConvergenceError
 from app.engines.empirical_engine import run_empirical_engine
 from app.engines.ideal_engine import run_ideal_engine
-from app.engines.netlist_parser import NetlistError, parse_netlist
+from app.engines.netlist_parser import DcSweep, NetlistError, parse_netlist_with_directives
 from app.engines.non_ideal_engine import run_non_ideal_engine
 
 # Automatically create database tables
@@ -88,10 +88,39 @@ def route_simulation(
     return {"simulation_id": sim_record.id, "data": results}
 
 
+def _operating_point_response(circuit: Circuit) -> dict:
+    result = circuit.solve()
+    return {
+        "status": "ok",
+        "mode": "op",
+        "results": result,
+        "iterations": circuit.last_iterations,
+    }
+
+
+def _dc_sweep_response(circuit: Circuit, dc: DcSweep) -> dict:
+    values = dc.values()
+    series, iterations = circuit.dc_sweep(dc.source, values)
+    return {
+        "status": "ok",
+        "mode": "dc_sweep",
+        "sweep": {
+            "source": dc.source,
+            "start": dc.start,
+            "stop": dc.stop,
+            "step": dc.step,
+            "values": values,
+        },
+        "series": series,
+        "iterations_per_point": iterations,
+        "max_iterations": max(iterations),
+    }
+
+
 @app.post("/api/v1/solve_circuit")
 def solve_circuit(request: CircuitSolveRequest):
     try:
-        elements = parse_netlist(request.netlist)
+        elements, dc = parse_netlist_with_directives(request.netlist)
     except NetlistError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -100,7 +129,9 @@ def solve_circuit(request: CircuitSolveRequest):
         circuit.add(el)
 
     try:
-        result = circuit.solve()
+        if dc is None:
+            return _operating_point_response(circuit)
+        return _dc_sweep_response(circuit, dc)
     except ConvergenceError as e:
         raise HTTPException(
             status_code=400,
@@ -113,5 +144,3 @@ def solve_circuit(request: CircuitSolveRequest):
             detail=f"Circuit could not be solved: {e}. "
             f"Check for disconnected nodes or conflicting sources.",
         )
-
-    return {"status": "ok", "results": result, "iterations": circuit.last_iterations}

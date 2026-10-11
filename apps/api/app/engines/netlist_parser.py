@@ -10,6 +10,8 @@ Supported syntax (deliberately minimal, mirrors real SPICE conventions):
     M1 d g s b NMOS W=1 L=180
                          -> MOSFET (NMOS or PMOS); drain, gate, source, bulk
     * this is a comment, ignored
+    .dc Vin 0 1.8 0.05   -> sweep source Vin from 0 to 1.8 V in 0.05 V steps
+    .op / .end           -> accepted and ignored (.end stops parsing)
     (blank lines are ignored)
 
 MOSFET parameters (all optional, KEY=VALUE, case-insensitive):
@@ -26,16 +28,34 @@ Element type is determined by the first character of the name (V, I, R, M).
 Node numbers are integers; 0 is ground.
 """
 
-from typing import List, Union
+import math
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
 from app.engines.circuit import CurrentSource, Mosfet, Resistor, VoltageSource
 
 Element = Union[Resistor, VoltageSource, CurrentSource, Mosfet]
 
+MAX_SWEEP_POINTS = 2000
+
 
 class NetlistError(Exception):
     """Raised when a netlist line can't be parsed."""
     pass
+
+
+@dataclass
+class DcSweep:
+    """A parsed '.dc <source> <start> <stop> <step>' directive."""
+    source: str
+    start: float
+    stop: float
+    step: float
+
+    def values(self) -> List[float]:
+        n = int(math.floor((self.stop - self.start) / self.step + 1e-9)) + 1
+        # start + i*step (not repeated addition) so rounding error doesn't accumulate
+        return [round(self.start + i * self.step, 12) for i in range(n)]
 
 
 _MOS_PARAMS = {
@@ -98,9 +118,42 @@ def _parse_mosfet(parts: List[str], line_num: int, line: str) -> Mosfet:
     )
 
 
+def _parse_dc(parts: List[str], line_num: int, line: str) -> DcSweep:
+    if len(parts) != 5:
+        raise NetlistError(
+            f"Line {line_num}: expected '.dc source start stop step', got: '{line}'"
+        )
+    try:
+        start, stop, step = (float(p) for p in parts[2:5])
+    except ValueError:
+        raise NetlistError(f"Line {line_num}: .dc start, stop and step must be numeric, got: '{line}'")
+
+    if step == 0:
+        raise NetlistError(f"Line {line_num}: .dc step must not be zero")
+    if (stop - start) * step < 0:
+        raise NetlistError(
+            f"Line {line_num}: .dc step has the wrong sign to get from {start:g} to {stop:g} "
+            f"(use a {'positive' if stop > start else 'negative'} step)"
+        )
+    n_points = int(math.floor((stop - start) / step + 1e-9)) + 1
+    if n_points > MAX_SWEEP_POINTS:
+        raise NetlistError(
+            f"Line {line_num}: .dc would need {n_points} points; the limit is {MAX_SWEEP_POINTS}. "
+            f"Use a larger step."
+        )
+    return DcSweep(source=parts[1], start=start, stop=stop, step=step)
+
+
 def parse_netlist(text: str) -> List[Element]:
+    """Elements only. Directives such as .dc are accepted but not returned;
+    use parse_netlist_with_directives() to get them."""
+    return parse_netlist_with_directives(text)[0]
+
+
+def parse_netlist_with_directives(text: str) -> Tuple[List[Element], Optional[DcSweep]]:
     elements: List[Element] = []
     seen_names = set()
+    dc: Optional[DcSweep] = None
 
     for line_num, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -111,6 +164,21 @@ def parse_netlist(text: str) -> List[Element]:
         parts = line.split()
         name = parts[0]
         kind = name[0].upper()
+
+        if name.startswith("."):
+            directive = name.lower()
+            if directive == ".end":
+                break
+            if directive == ".op":
+                continue
+            if directive == ".dc":
+                if dc is not None:
+                    raise NetlistError(f"Line {line_num}: only one .dc directive is supported")
+                dc = _parse_dc(parts, line_num, line)
+                continue
+            raise NetlistError(
+                f"Line {line_num}: unsupported directive '{name}' (supported: .dc, .op, .end)"
+            )
 
         if kind not in ("V", "I", "R", "M"):
             raise NetlistError(
@@ -156,4 +224,16 @@ def parse_netlist(text: str) -> List[Element]:
     if not elements:
         raise NetlistError("Netlist is empty -- no valid element lines found.")
 
-    return elements
+    if dc is not None:
+        match = next(
+            (e for e in elements
+             if isinstance(e, (VoltageSource, CurrentSource)) and e.name.upper() == dc.source.upper()),
+            None,
+        )
+        if match is None:
+            raise NetlistError(
+                f".dc source '{dc.source}' is not a voltage or current source in this netlist"
+            )
+        dc.source = match.name  # canonical spelling from the element line
+
+    return elements, dc
