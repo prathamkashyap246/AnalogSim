@@ -10,7 +10,7 @@ own reference.
 """
 
 from app.engines.circuit import Circuit, ConvergenceError, CurrentSource, Mosfet, Resistor, VoltageSource
-from app.engines.netlist_parser import NetlistError, parse_netlist
+from app.engines.netlist_parser import NetlistError, parse_netlist, parse_netlist_with_directives
 from app.engines.non_ideal_engine import calculate_non_ideal_current, mosfet_constants
 
 failures = 0
@@ -130,6 +130,102 @@ for label, text in (("duplicate name", "R1 1 0 100\nR1 1 2 100"),
         ok = True
     failures += (not ok)
     print(f"[{'PASS' if ok else 'FAIL'}] parser rejects {label}")
+
+# --- 8. .dc sweep -------------------------------------------------------------
+def sweep(netlist):
+    elements, dc = parse_netlist_with_directives(netlist)
+    c = Circuit()
+    for el in elements:
+        c.add(el)
+    series, iters = c.dc_sweep(dc.source, dc.values())
+    return dc, series, iters, c
+
+
+def flag(label, ok):
+    global failures
+    failures += (not ok)
+    print(f"[{'PASS' if ok else 'FAIL'}] {label}")
+
+
+# 8a. parser: point counts, direction, canonical source name
+dc = parse_netlist_with_directives("Vin 1 0 0\nR1 1 0 1\n.dc VIN 0 1.8 0.05")[1]
+flag("parse .dc: 37 points from 0 to 1.8", len(dc.values()) == 37 and dc.values()[0] == 0.0 and dc.values()[-1] == 1.8)
+flag("parse .dc: source name taken from the element line (VIN -> Vin)", dc.source == "Vin")
+dc = parse_netlist_with_directives("Vin 1 0 0\nR1 1 0 1\n.dc Vin 1 0 -0.25")[1]
+flag("parse .dc: downward sweep 1 -> 0 gives 5 points", dc.values() == [1.0, 0.75, 0.5, 0.25, 0.0])
+for label, text in (("unknown source", ".dc Vx 0 1 0.1"), ("resistor as source", ".dc R1 0 1 0.1"),
+                    ("zero step", ".dc Vin 0 1 0"), ("wrong-sign step", ".dc Vin 0 1 -0.1"),
+                    ("too many points", ".dc Vin 0 1 0.0001"), ("missing field", ".dc Vin 0 1"),
+                    ("second .dc", ".dc Vin 0 1 0.1\n.dc Vin 0 2 0.1"), ("unsupported directive", ".tran 1n 1u")):
+    try:
+        parse_netlist_with_directives("Vin 1 0 0\nR1 1 0 1\n" + text)
+        ok = False
+    except NetlistError:
+        ok = True
+    flag(f"parser rejects .dc case: {label}", ok)
+flag("parse_netlist() still returns plain element list when .dc present",
+     len(parse_netlist("Vin 1 0 0\nR1 1 0 1\n.dc Vin 0 1 0.1\n.end")) == 2)
+
+# 8b. linear divider sweep: V(2) = (2/3) * Vin at every point
+dc, ser, it, c = sweep("Vin 1 0 0\nR1 1 2 1000\nR2 2 0 2000\n.dc Vin 0 10 1")
+err = max(abs(v2 - (2 / 3) * x) for v2, x in zip(ser["V(2)"], dc.values()))
+check("linear divider sweep, worst error over 11 points", err, 0.0, 1e-9)
+
+# 8c. source value restored after sweep
+elements, dcs = parse_netlist_with_directives("Vin 1 0 3.3\nR1 1 0 1000\n.dc Vin 0 1 0.5")
+c = Circuit()
+for el in elements:
+    c.add(el)
+c.dc_sweep(dcs.source, dcs.values())
+check("source value restored after sweep (Vin was 3.3)", c.solve()["V(1)"], 3.3, 1e-12)
+
+# 8d. current-source sweep into a resistor: V = I*R
+dc, ser, it, c = sweep("I1 0 1 0\nR1 1 0 2000\n.dc I1 0 1e-3 2.5e-4")
+err = max(abs(v - i * 2000) for v, i in zip(ser["V(1)"], dc.values()))
+check("current-source sweep into 2k resistor, worst error", err, 0.0, 1e-9)
+
+# 8e. CMOS inverter VTC
+INV = "Vdd 1 0 1.8\nVin 2 0 0\nM1 3 2 0 0 NMOS\nM2 3 2 1 1 PMOS\n.dc Vin 0 1.8 0.05"
+dc, ser, it, c = sweep(INV)
+vin, vout = dc.values(), ser["V(3)"]
+check("VTC endpoint Vin=0 -> Vout", vout[0], 1.8, 1e-6)
+check("VTC endpoint Vin=Vdd -> Vout", vout[-1], 0.0, 1e-6)
+check("VTC midpoint Vin=0.9 -> Vout (symmetric pair)", vout[18], 0.9, 1e-6)
+flag("VTC monotonically non-increasing across 37 points",
+     all(b <= a + 1e-9 for a, b in zip(vout, vout[1:])))
+# the pair is mobility- and Vth-matched, so Vout(Vin) + Vout(Vdd - Vin) = Vdd
+sym = max(abs(vout[i] + vout[36 - i] - 1.8) for i in range(37))
+check("VTC point-symmetry Vout(Vin)+Vout(Vdd-Vin)=Vdd, worst error", sym, 0.0, 1e-6)
+kcl = max(abs(a + b) for a, b in zip(ser["Id(M1)"], ser["Id(M2)"]))
+check("VTC KCL at output, worst |Id(M1)+Id(M2)| over sweep", kcl, 0.0, 1e-9)
+
+# 8f. warm-started sweep must equal independent cold solves, point by point
+worst = 0.0
+for x, warm in zip(vin, vout):
+    cold = solve(INV.replace("Vin 2 0 0", f"Vin 2 0 {x}").split("\n.dc")[0])[0]["V(3)"]
+    worst = max(worst, abs(cold - warm))
+check("warm-started sweep vs cold solves, worst difference", worst, 0.0, 1e-7)
+
+cold_iters = [solve(INV.replace("Vin 2 0 0", f"Vin 2 0 {x}").split("\n.dc")[0])[1].last_iterations for x in vin]
+flag(f"warm start never slower overall (warm total {sum(it)} vs cold total {sum(cold_iters)} iterations)",
+     sum(it) <= sum(cold_iters))
+
+# 8g. common-source amp sweep against bisection reference at every point
+dc, ser, it, c = sweep("Vdd 1 0 1.8\nVg 2 0 0\nR1 1 3 5000\nM1 3 2 0 0 NMOS\n.dc Vg 0 1.8 0.1")
+err = max(abs(v3 - cs_expected(1.8, vg, 5000)) for v3, vg in zip(ser["V(3)"], dc.values()))
+check("CS amp Vg sweep vs bisection reference, worst error over 19 points", err, 0.0, 1e-7)
+
+# 8h. convergence failure names the sweep point
+elements, dcs = parse_netlist_with_directives(INV)
+c = Circuit()
+for el in elements:
+    c.add(el)
+c.MAX_ITER = 1
+try:
+    c.dc_sweep(dcs.source, dcs.values())
+    flag("non-convergence raises ConvergenceError naming the sweep value", False)
+except ConvergenceError as e:
+    flag(f"non-convergence raises ConvergenceError naming the sweep value ('{e}')", "Vin = " in str(e))
 
 print("\nAll checks passed." if failures == 0 else f"\n{failures} CHECK(S) FAILED.")
 raise SystemExit(1 if failures else 0)
