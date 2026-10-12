@@ -314,48 +314,14 @@
   <div class="view active" id="view-overview">
     <div class="headline-block">
       <div class="headline-eyebrow">DEVICE LAB / SESSION 001</div>
-      <h1 class="headline">No analog simulations yet.<span class="fade"> Set up a circuit or device to begin.</span></h1>
-      <div class="meta-line">nothing simulated this session &middot; solver warmed up and waiting</div>
-    </div>
-
-    <div class="metric-strip">
-      <div class="metric">
-        <div class="metric-label">PEAK CURRENT</div>
-        <div class="metric-value">0<span class="unit">mA</span></div>
-        <div class="metric-delta">—</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">RUNS</div>
-        <div class="metric-value">0<span class="unit">total</span></div>
-        <div class="metric-delta">all time</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">CONVERGENCE</div>
-        <div class="metric-value">0<span class="unit">%</span></div>
-        <div class="metric-delta">stable</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">SOLVER LOAD</div>
-        <div class="metric-value">0<span class="unit">%</span></div>
-        <div class="metric-delta warn">idle</div>
-      </div>
+      <h1 class="headline">Analog device and circuit lab.<span class="fade"> Sweep a transistor model, or solve a circuit from a netlist.</span></h1>
+      <div class="meta-line">ideal, non-ideal and empirical device models &middot; DC circuit solver with Newton–Raphson</div>
     </div>
 
     <div class="action-row">
       <button class="pill-btn primary" onclick="showView('wizard')">▶ Launch a sweep</button>
-      <button class="pill-btn">↑ Load a device preset</button>
-      <button class="pill-btn">↘ Pull netlist from GitHub</button>
-    </div>
-
-    <div class="frame log-panel">
-      <div class="frame-tag">FIG. 01</div>
-      <div class="log-header">
-        <span>SWEEP LOG</span>
-        <a onclick="showView('results')">view all →</a>
-      </div>
-      <div class="log-body">
-        <div class="empty-text">nothing logged yet — launch a sweep from the testbench</div>
-      </div>
+      <button class="pill-btn" onclick="openNetlistExample('inverter')">▶ Try the CMOS inverter sweep</button>
+      <button class="pill-btn" onclick="openNetlistExample('cs')">▶ Try the common-source sweep</button>
     </div>
   </div>
 
@@ -480,7 +446,7 @@
     <div class="headline-block">
       <div class="headline-eyebrow">CIRCUIT LAB</div>
       <h1 class="headline" style="font-size:22px;">Simulate a circuit template</h1>
-      <div class="meta-line">closed-form and square-law models, computed in your browser</div>
+      <div class="meta-line">RC, inverter and amplifier templates run in your browser &middot; the netlist solver runs on the backend</div>
     </div>
 
     <div class="action-row" id="template-row">
@@ -917,6 +883,14 @@ const NETLIST_EXAMPLES = {
 function loadNetlistExample(name){
   document.getElementById('netlist_input').value = NETLIST_EXAMPLES[name];
   document.getElementById('netlist-error').style.display = 'none';
+}
+
+// Dashboard shortcut: jump to the Circuits tab, load an example netlist and run it
+function openNetlistExample(name){
+  showView('circuits');
+  selectTemplate('netlist');
+  loadNetlistExample(name);
+  simulateCircuit();
 }
 
 const SWEEP_COLORS = ['#b5541f', '#2f6f6b', '#4a5164', '#8a6d3b', '#7a4e8c', '#3f7cac'];
