@@ -354,7 +354,8 @@
             <select id="sweep_param">
               <option value="vgs" selected>Gate voltage (Vgs)</option>
               <option value="vds">Drain voltage (Vds)</option>
-              <option value="temp">Temperature (°C)</option>
+              <option value="vsb">Source-bulk voltage (Vsb)</option>
+              <option value="temp">Temperature (−40 to 125 °C)</option>
             </select>
           </div>
         </section>
@@ -631,7 +632,11 @@ async function runSimulation(){
     lambda_param: getFloatVal("lambda_param"),
     enable_body_effect: getBoolVal("enable_body_effect"),
     enable_clm: getBoolVal("enable_clm"),
-    enable_velocity_saturation: getBoolVal("enable_velocity_saturation")
+    enable_velocity_saturation: getBoolVal("enable_velocity_saturation"),
+    fixed_vgs: getFloatVal("fixed_vgs"),
+    fixed_vds: getFloatVal("fixed_vds"),
+    fixed_vsb: getFloatVal("fixed_vsb"),
+    temp_c: getFloatVal("temp_c")
   };
 
   try{
@@ -645,7 +650,20 @@ async function runSimulation(){
     const res = await response.json();
     const data = res.data;
 
-    let xValues = data.vgs || [];
+    // x axis follows the swept variable (the empirical engine always sweeps Vgs)
+    const SWEEP_AXES = {
+      vgs:  ['vgs',    'Gate voltage Vgs (V)'],
+      vds:  ['vds',    'Drain voltage Vds (V)'],
+      vsb:  ['vsb',    'Source-bulk voltage Vsb (V)'],
+      temp: ['temp_c', 'Temperature (°C)']
+    };
+    const [xKey, xLabel] = engineType === 'empirical' ? SWEEP_AXES.vgs : (SWEEP_AXES[sweepParam] || SWEEP_AXES.vgs);
+    let xValues = data[xKey] || [];
+    if(xValues.length === 0){
+      setStatus('idle', 'failed');
+      showError('The ' + engineType + ' engine has no ' + sweepParam.toUpperCase() + ' sweep. Use the non-ideal engine for Vsb or temperature sweeps.');
+      return;
+    }
     let traces = [];
 
     if (data.id_empirical) {
@@ -685,7 +703,7 @@ async function runSimulation(){
       margin: { t: 20, r: 24, b: 48, l: 56 },
       paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
       font: { family: 'Inter, sans-serif', color: '#7a8094', size: 12 },
-      xaxis: { title: { text: 'Gate Voltage Vgs (V)', font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' },
+      xaxis: { title: { text: xLabel, font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' },
       yaxis: { title: { text: 'Drain current Id (mA)', font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' }
     };
 
