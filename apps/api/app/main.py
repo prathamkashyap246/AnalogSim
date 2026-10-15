@@ -7,7 +7,7 @@ from app.db import database, models
 from app.engines.circuit import Circuit, ConvergenceError
 from app.engines.empirical_engine import run_empirical_engine
 from app.engines.ideal_engine import run_ideal_engine
-from app.engines.netlist_parser import DcSweep, NetlistError, parse_netlist_with_directives
+from app.engines.netlist_parser import AcSweep, DcSweep, NetlistError, parse_netlist_full
 from app.engines.non_ideal_engine import run_non_ideal_engine
 
 # Automatically create database tables
@@ -132,21 +132,35 @@ def _dc_sweep_response(circuit: Circuit, dc: DcSweep) -> dict:
     }
 
 
+def _ac_response(circuit: Circuit, ac: AcSweep) -> dict:
+    freqs = ac.values()
+    series = circuit.ac_analysis(freqs)
+    return {
+        "status": "ok",
+        "mode": "ac",
+        "sweep": {"kind": ac.kind, "points": ac.points, "start": ac.start, "stop": ac.stop, "freqs": freqs},
+        "series": series,
+        "operating_point": circuit.last_op,
+    }
+
+
 @app.post("/api/v1/solve_circuit")
 def solve_circuit(request: CircuitSolveRequest):
     try:
-        elements, dc = parse_netlist_with_directives(request.netlist)
+        parsed = parse_netlist_full(request.netlist)
     except NetlistError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     circuit = Circuit()
-    for el in elements:
+    for el in parsed.elements:
         circuit.add(el)
 
     try:
-        if dc is None:
+        if parsed.ac is not None:
+            return _ac_response(circuit, parsed.ac)
+        if parsed.dc is None:
             return _operating_point_response(circuit)
-        return _dc_sweep_response(circuit, dc)
+        return _dc_sweep_response(circuit, parsed.dc)
     except ConvergenceError as e:
         raise HTTPException(
             status_code=400,

@@ -7,6 +7,7 @@ Elements:
     - Resistor
     - VoltageSource  (independent DC source)
     - CurrentSource  (independent DC source, SPICE convention)
+    - Capacitor      (open circuit at DC; jwC admittance in AC analysis)
     - Mosfet         (nonlinear; uses the project's non-ideal square-law model)
 
 Circuits with only linear elements are solved with a single linear solve.
@@ -14,6 +15,13 @@ As soon as a Mosfet is present, the solver switches to Newton-Raphson:
 every iteration linearizes each MOSFET around the current guess (a
 "companion model": conductances + an equivalent current source), stamps
 that into the same MNA matrix, and re-solves until the update is tiny.
+
+Small-signal AC analysis (Circuit.ac_analysis) first solves the DC operating
+point, then linearizes every MOSFET there (gm, gds, gmb come from the same
+finite-difference Jacobian Newton-Raphson uses) and solves the complex
+system (G + jwC) x = b once per frequency. Independent sources contribute
+only their AC magnitude, so with "AC 1" on the input a node voltage IS the
+transfer function.
 """
 
 from dataclasses import dataclass, field
@@ -27,6 +35,18 @@ from app.engines.non_ideal_engine import calculate_non_ideal_current, mosfet_con
 class ConvergenceError(Exception):
     """Raised when Newton-Raphson fails to converge."""
     pass
+
+
+def _stamp_admittance(Y: np.ndarray, node_index: Dict[int, int], a: int, b: int, y) -> None:
+    """Stamp an admittance y between nodes a and b (either may be ground)."""
+    ia, ib = node_index.get(a), node_index.get(b)
+    if ia is not None:
+        Y[ia, ia] += y
+    if ib is not None:
+        Y[ib, ib] += y
+    if ia is not None and ib is not None:
+        Y[ia, ib] -= y
+        Y[ib, ia] -= y
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +77,27 @@ class Resistor:
             A[p, n] -= g
             A[n, p] -= g
 
+    def stamp_ac(self, Y, z, node_index, extra_index, omega, volts) -> None:
+        _stamp_admittance(Y, node_index, self.node_p, self.node_n, 1.0 / self.resistance)
+
+
+@dataclass
+class Capacitor:
+    """A capacitor. Open circuit at DC; admittance jwC in AC analysis."""
+    node_p: int
+    node_n: int
+    capacitance: float
+    name: str = "C1"
+
+    def terminals(self):
+        return (self.node_p, self.node_n)
+
+    def stamp(self, A: np.ndarray, z: np.ndarray, node_index: Dict[int, int], extra_index: Dict[str, int]) -> None:
+        pass  # open circuit at DC
+
+    def stamp_ac(self, Y, z, node_index, extra_index, omega, volts) -> None:
+        _stamp_admittance(Y, node_index, self.node_p, self.node_n, 1j * omega * self.capacitance)
+
 
 @dataclass
 class VoltageSource:
@@ -71,6 +112,7 @@ class VoltageSource:
     node_n: int
     voltage: float
     name: str = "V1"
+    ac_mag: float = 0.0  # small-signal magnitude used by AC analysis (SPICE "AC 1")
 
     def terminals(self):
         return (self.node_p, self.node_n)
@@ -89,6 +131,18 @@ class VoltageSource:
 
         z[k] += self.voltage
 
+    def stamp_ac(self, Y, z, node_index, extra_index, omega, volts) -> None:
+        k = extra_index[self.name]
+        p = node_index.get(self.node_p)
+        n = node_index.get(self.node_n)
+        if p is not None:
+            Y[p, k] += 1.0
+            Y[k, p] += 1.0
+        if n is not None:
+            Y[n, k] -= 1.0
+            Y[k, n] -= 1.0
+        z[k] += self.ac_mag
+
 
 @dataclass
 class CurrentSource:
@@ -101,6 +155,7 @@ class CurrentSource:
     node_n: int
     current: float
     name: str = "I1"
+    ac_mag: float = 0.0
 
     def terminals(self):
         return (self.node_p, self.node_n)
@@ -113,6 +168,14 @@ class CurrentSource:
             z[p] -= self.current
         if n is not None:
             z[n] += self.current
+
+    def stamp_ac(self, Y, z, node_index, extra_index, omega, volts) -> None:
+        p = node_index.get(self.node_p)
+        n = node_index.get(self.node_n)
+        if p is not None:
+            z[p] -= self.ac_mag
+        if n is not None:
+            z[n] += self.ac_mag
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +212,8 @@ class Mosfet:
     enable_body_effect: bool = True
     enable_clm: bool = True
     enable_velocity_saturation: bool = False
+    cgs: float = 0.0  # gate-source capacitance (F), used only by AC analysis
+    cgd: float = 0.0  # gate-drain capacitance (F), used only by AC analysis
 
     is_nonlinear = True
     _FD_STEP = 1e-6  # volts, for the central-difference Jacobian
@@ -185,15 +250,10 @@ class Mosfet:
             return -self._id_nmos(-vd, -vg, -vs, -vb)
         return self._id_nmos(vd, vg, vs, vb)
 
-    # -- Newton-Raphson companion model ------------------------------------
-    def stamp_newton(self, A: np.ndarray, z: np.ndarray, volts: Dict[int, float], node_index: Dict[int, int]) -> None:
-        nodes = self.terminals()
-        v0 = [volts[n] for n in nodes]
-        i0 = self.drain_current(*v0)
-
-        # dId/dV for each of the four terminal voltages (central differences).
-        # Done on the current function itself so the Jacobian is always
-        # consistent with whatever model flags are on.
+    def _gradients(self, v0) -> List[float]:
+        """dId/dV for each terminal voltage (d, g, s, b), by central differences.
+        Done on the current function itself so the Jacobian is always
+        consistent with whatever model flags are on."""
         h = self._FD_STEP
         grads = []
         for k in range(4):
@@ -201,6 +261,35 @@ class Mosfet:
             vp[k] += h
             vm[k] -= h
             grads.append((self.drain_current(*vp) - self.drain_current(*vm)) / (2.0 * h))
+        return grads
+
+    # -- Small-signal AC model ---------------------------------------------
+    def stamp_ac(self, Y, z, node_index, extra_index, omega, volts) -> None:
+        """Linearize at the DC operating point: a voltage-controlled current
+        source per terminal (gds on the drain, gm on the gate, gmb on the
+        bulk) plus optional Cgs / Cgd."""
+        grads = self._gradients([volts[n] for n in self.terminals()])
+        row_d = node_index.get(self.node_d)
+        row_s = node_index.get(self.node_s)
+        for k, node in enumerate(self.terminals()):
+            col = node_index.get(node)
+            if col is None:
+                continue
+            if row_d is not None:
+                Y[row_d, col] += grads[k]
+            if row_s is not None:
+                Y[row_s, col] -= grads[k]
+        if self.cgs:
+            _stamp_admittance(Y, node_index, self.node_g, self.node_s, 1j * omega * self.cgs)
+        if self.cgd:
+            _stamp_admittance(Y, node_index, self.node_g, self.node_d, 1j * omega * self.cgd)
+
+    # -- Newton-Raphson companion model ------------------------------------
+    def stamp_newton(self, A: np.ndarray, z: np.ndarray, volts: Dict[int, float], node_index: Dict[int, int]) -> None:
+        nodes = self.terminals()
+        v0 = [volts[n] for n in nodes]
+        i0 = self.drain_current(*v0)
+        grads = self._gradients(v0)
 
         i_eq = i0 - sum(g * v for g, v in zip(grads, v0))
 
@@ -355,6 +444,49 @@ class Circuit:
             setattr(src, attr, original)
 
         return series, iterations
+
+    def ac_analysis(self, freqs: List[float]) -> Dict[str, Dict[str, List[float]]]:
+        """
+        Small-signal frequency response around the DC operating point.
+
+        At least one source needs a non-zero AC magnitude (SPICE "AC 1").
+        Returns {"V(<node>)" or "I(<source>)": {"mag": [...], "db": [...],
+        "phase_deg": [...]}}, one entry per frequency. The DC operating
+        point used is left in self.last_op.
+        """
+        if not any(getattr(e, "ac_mag", 0.0) for e in self.elements):
+            raise ValueError("AC analysis needs a source with an AC magnitude, e.g. 'Vin 1 0 0 AC 1'")
+        if any(f <= 0 for f in freqs):
+            raise ValueError("AC frequencies must be positive")
+
+        self.last_op, x = self._solve_full()
+        sorted_nodes, node_index, extra_index = self._collect_nodes_and_sources()
+        n_nodes = len(sorted_nodes)
+        size = n_nodes + len(extra_index)
+        volts = self._volts(x, sorted_nodes)
+
+        labels = [f"V({n})" for n in sorted_nodes] + [f"I({name})" for name in extra_index]
+        rows: List[np.ndarray] = []
+        for f in freqs:
+            omega = 2.0 * np.pi * f
+            Y = np.zeros((size, size), dtype=complex)
+            z = np.zeros(size, dtype=complex)
+            for el in self.elements:
+                el.stamp_ac(Y, z, node_index, extra_index, omega, volts)
+            for i in range(n_nodes):
+                Y[i, i] += self.GMIN
+            rows.append(np.linalg.solve(Y, z))
+
+        sol = np.array(rows)  # shape (n_freqs, size)
+        out: Dict[str, Dict[str, List[float]]] = {}
+        for col, label in enumerate(labels):
+            mag = np.abs(sol[:, col])
+            out[label] = {
+                "mag": mag.tolist(),
+                "db": (20.0 * np.log10(np.maximum(mag, 1e-300))).tolist(),
+                "phase_deg": np.degrees(np.angle(sol[:, col])).tolist(),
+            }
+        return out
 
     @staticmethod
     def _volts(x: np.ndarray, sorted_nodes) -> Dict[int, float]:

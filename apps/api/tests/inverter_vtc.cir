@@ -1,0 +1,17 @@
+* CMOS Inverter VTC Sweep Reference
+.model nmos1 nmos level=1 vto=0.7 kp=100u gamma=0 lambda=0
+.model pmos1 pmos level=1 vto=-0.7 kp=50u gamma=0 lambda=0
+
+Vdd vdd 0 DC 5V
+Vin vin 0 DC 0V
+
+M1 vout vin 0 0 nmos1 W=2u L=1u
+M2 vout vin vdd vdd pmos1 W=4u L=1u
+
+.dc Vin 0 5 0.1
+
+.control
+  run
+  wrdata vtc_reference.txt v(vout)
+.endc
+.end

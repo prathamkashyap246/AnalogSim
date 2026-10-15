@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AnalogSim — Device Lab</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: #f5f2ea;
+    --paper-2: #ffffff;
+    --ink: #1c2230;
+    --ink-soft: #4a5164;
+    --muted: #7a8094;
+    --line: #d8d2c2;
+    --line-strong: #b9b19c;
+    --rule: #cfd8de;
+    --accent: #b5541f;
+    --accent-soft: rgba(181,84,31,0.10);
+    --teal: #2e6e6a;
+    --teal-soft: rgba(46,110,106,0.10);
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  *{ box-sizing: border-box; }
+  html, body{ margin: 0; padding: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
+
+  body{
+    background-image:
+      linear-gradient(rgba(28,34,48,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(28,34,48,0.045) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  /* ---------- Top bar (replaces sidebar entirely) ---------- */
+  .topbar{
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    padding: 16px 28px;
+    background: var(--paper-2);
+    border-bottom: 1.5px solid var(--ink);
+    flex-wrap: wrap;
+  }
+
+  .logo{ display: flex; align-items: center; gap: 9px; margin-right: 6px; }
+  .logo-mark{
+    width: 22px; height: 22px;
+    border: 2px solid var(--ink);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .logo-mark::before{
+    content:"";
+    position: absolute; inset: 4px;
+    background: var(--accent);
+  }
+  .logo-name{ font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+
+  .toptabs{ display: flex; gap: 2px; flex-wrap: wrap; }
+  .toptab{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    padding: 7px 12px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .toptab:hover{ color: var(--ink); }
+  .toptab.active{ color: var(--ink); border-color: var(--accent); font-weight: 600; }
+
+  .top-spacer{ flex-grow: 1; }
+
+  .launch-btn{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 9px 16px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+    transition: background 0.15s ease;
+  }
+  .launch-btn:hover{ background: var(--accent); }
+
+  /* ---------- Shared frame / tag utility ---------- */
+  .frame{
+    position: relative;
+    background: var(--paper-2);
+    border: 1.5px solid var(--ink);
+  }
+  .frame-tag{
+    position: absolute;
+    top: -1.5px; right: 12px;
+    transform: translateY(-50%);
+    background: var(--paper-2);
+    padding: 0 7px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  .main{ max-width: 1080px; margin: 0 auto; padding: 34px 28px 70px; }
+
+  .view{ display: none; }
+  .view.active{ display: block; animation: rise 0.22s ease; }
+  @keyframes rise{ from{ opacity:0; transform: translateY(5px);} to{ opacity:1; transform: translateY(0);} }
+
+  /* ---------- Overview ---------- */
+  .headline-block{ margin-bottom: 26px; }
+  .headline-eyebrow{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .headline{ font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; margin: 0; }
+  .headline .fade{ color: var(--muted); font-weight: 500; }
+
+  .meta-line{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+
+  /* metrics strip — deliberately NOT stat-cards-with-sparklines */
+  .metric-strip{
+    display: flex;
+    border: 1.5px solid var(--ink);
+    background: var(--paper-2);
+    margin-bottom: 22px;
+    overflow-x: auto;
+  }
+  .metric{
+    flex: 1;
+    min-width: 140px;
+    padding: 14px 18px;
+    border-right: 1px solid var(--line-strong);
+  }
+  .metric:last-child{ border-right: none; }
+  .metric-label{
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .metric-value{ font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .metric-value .unit{ font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+  .metric-delta{ font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .metric-delta.warn{ color: var(--accent); }
+
+  /* quick actions as an inline pill row, not a sidebar/panel */
+  .action-row{
+    display: flex;
+    gap: 10px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  .pill-btn{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 9px 14px;
+    border: 1.5px solid var(--ink);
+    background: var(--paper-2);
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .pill-btn:hover{ background: var(--ink); color: var(--paper); }
+  .pill-btn.primary{ background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pill-btn.primary:hover{ background: #93400f; border-color: #93400f; }
+
+  .log-panel{ padding: 0; margin-bottom: 4px; }
+  .log-header{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1.5px solid var(--ink);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+  }
+  .log-header a{ color: var(--teal); text-decoration: none; cursor: pointer; }
+  .log-body{ padding: 46px 18px; text-align: center; }
+  .empty-text{ font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+
+  /* ---------- Wizard ---------- */
+  .wizard-frame{ max-width: 640px; }
+  .step-ruler{
+    display: flex;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .tick{
+    flex: 1;
+    text-align: center;
+    padding: 9px 0;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--line-strong);
+    border-right: 1px solid var(--line);
+    letter-spacing: 0.05em;
+  }
+  .tick:last-child{ border-right: none; }
+  .tick.done{ color: var(--teal); }
+  .tick.now{ color: var(--accent); font-weight: 700; }
+
+  .wizard-body{ padding: 30px 30px 24px; min-height: 300px; }
+  .step-meta{ font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.04em; }
+  .step-title{ font-size: 20px; font-weight: 800; letter-spacing: -0.015em; margin: 0 0 4px; }
+  .step-desc{ font-size: 13px; color: var(--muted); margin: 0 0 24px; max-width: 46ch; }
+
+  .step-panel{ display: none; animation: rise 0.2s ease; }
+  .step-panel.active{ display: block; }
+
+  .field{ margin-bottom: 15px; }
+  .field:last-child{ margin-bottom: 0; }
+  .field-row{ display: flex; gap: 12px; }
+  .field-row .field{ flex: 1; }
+  label.field-label{ display: block; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.03em; }
+
+  select, input[type="number"]{
+    width: 100%; padding: 9px 11px;
+    background: var(--paper-2); color: var(--ink);
+    border: 1.5px solid var(--line-strong);
+    font-family: var(--font-mono); font-size: 13px; outline: none;
+    transition: border-color .15s ease;
+    appearance: none;
+  }
+  select{
+    font-family: var(--font-ui);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a8094' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 11px center; padding-right: 28px;
+  }
+  select:focus, input[type="number"]:focus{ border-color: var(--accent); }
+
+  .toggle-row{ display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .toggle-row:last-child{ border-bottom: none; }
+  .toggle-row span{ font-size: 12.5px; }
+
+  .switch{ position: relative; width: 36px; height: 19px; flex-shrink: 0; }
+  .switch input{ opacity: 0; width: 0; height: 0; position: absolute; }
+  .track{ position: absolute; inset: 0; background: var(--paper); border: 1.5px solid var(--ink); transition: background .15s ease; cursor: pointer; }
+  .track::before{ content: ""; position: absolute; width: 11px; height: 11px; left: 2px; top: 2px; background: var(--ink); transition: transform .15s ease, background .15s ease; }
+  .switch input:checked + .track{ background: var(--accent-soft); border-color: var(--accent); }
+  .switch input:checked + .track::before{ transform: translateX(16px); background: var(--accent); }
+
+  .review-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+  .review-item{ display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .review-item span:first-child{ color: var(--muted); }
+  .review-item span:last-child{ font-family: var(--font-mono); font-weight: 600; }
+
+  .wizard-footer{ display: flex; align-items: center; justify-content: space-between; padding: 15px 30px; border-top: 1.5px solid var(--ink); }
+
+  .btn{ font-family: var(--font-mono); padding: 9px 17px; font-size: 12.5px; font-weight: 700; cursor: pointer; border: 1.5px solid var(--ink); background: var(--paper-2); color: var(--ink); transition: background .15s ease, color .15s ease; }
+  .btn:hover{ background: var(--ink); color: var(--paper); }
+  .btn:disabled{ opacity: 0; pointer-events: none; }
+  .btn.primary{ background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover{ background: #93400f; }
+
+  /* ---------- Results ---------- */
+  .results-frame{ max-width: 920px; }
+  .results-header{ padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1.5px solid var(--ink); }
+  .results-title{ font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
+  .results-title span{ color: var(--muted); font-weight: 400; }
+  .rstatus{ font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .rstatus .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+  .rstatus.live .dot{ background: var(--teal); }
+  .results-body{ padding: 8px; position: relative; }
+  #plot{ width: 100%; height: 430px; }
+  .banner{ position: absolute; left: 18px; right: 18px; top: 14px; background: #fdece3; border: 1.5px solid var(--accent); color: #7a3010; padding: 10px 14px; font-size: 12px; font-family: var(--font-mono); display: none; z-index: 3; }
+  .banner.show{ display: block; }
+
+  ::-webkit-scrollbar{ height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb{ background: var(--line-strong); }
+  ::-webkit-scrollbar-track{ background: transparent; }
+
+  @media (max-width: 700px){
+    .field-row{ flex-direction: column; gap: 16px; }
+    .review-grid{ grid-template-columns: 1fr; }
+    .metric-strip{ flex-wrap: wrap; }
+    .metric{ flex: 1 1 45%; border-bottom: 1px solid var(--line-strong); }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo"><div class="logo-mark"></div><div class="logo-name">AnalogSim</div></div>
+  <div class="toptabs">
+    <div class="toptab active" data-nav="overview" onclick="showView('overview')">Dashboard</div>
+    <div class="toptab" data-nav="wizard" onclick="showView('wizard')">Testbench</div>
+    <div class="toptab" data-nav="results" onclick="showView('results')">Waveforms</div>
+    <div class="toptab" data-nav="circuits" onclick="showView('circuits')">Circuits</div>
+  </div>
+  <div class="top-spacer"></div>
+  <button class="launch-btn" onclick="showView('wizard')">Launch a sweep</button>
+</div>
+
+<div class="main">
+
+  <!-- OVERVIEW -->
+  <div class="view active" id="view-overview">
+    <div class="headline-block">
+      <div class="headline-eyebrow">DEVICE LAB / SESSION 001</div>
+      <h1 class="headline">Analog device and circuit lab.<span class="fade"> Sweep a transistor model, or solve a circuit from a netlist.</span></h1>
+      <div class="meta-line">ideal, non-ideal and empirical device models &middot; DC circuit solver with Newton–Raphson</div>
+    </div>
+
+    <div class="action-row">
+      <button class="pill-btn primary" onclick="showView('wizard')">▶ Launch a sweep</button>
+      <button class="pill-btn" onclick="openNetlistExample('inverter')">▶ Try the CMOS inverter sweep</button>
+      <button class="pill-btn" onclick="openNetlistExample('cs')">▶ Try the common-source sweep</button>
+    </div>
+  </div>
+
+  <!-- WIZARD -->
+  <div class="view" id="view-wizard">
+    <div class="headline-block">
+      <div class="headline-eyebrow">NEW SIMULATION</div>
+      <h1 class="headline" style="font-size:22px;">Configure testbench</h1>
+    </div>
+
+    <div class="frame wizard-frame">
+      <div class="frame-tag">SPEC-04</div>
+      <div class="step-ruler" id="step-ruler"></div>
+      <div class="wizard-body">
+
+        <section class="step-panel active" data-step="0">
+          <div class="step-meta">STEP 1 / 5</div>
+          <h2 class="step-title">Choose your engine</h2>
+          <p class="step-desc">Pick the solver and the variable you want to sweep across.</p>
+          <div class="field">
+            <label class="field-label">Simulation engine</label>
+            <select id="engine_type">
+              <option value="empirical" selected>Empirical — Measured Data</option>
+              <option value="non_ideal">Non-ideal — full physics</option>
+              <option value="ideal">Ideal — first-order</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Sweep variable</label>
+            <select id="sweep_param">
+              <option value="vgs" selected>Gate voltage (Vgs)</option>
+              <option value="vds">Drain voltage (Vds)</option>
+              <option value="vsb">Source-bulk voltage (Vsb)</option>
+              <option value="temp">Temperature (−40 to 125 °C)</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="step-panel" data-step="1">
+          <div class="step-meta">STEP 2 / 5</div>
+          <h2 class="step-title">Device geometry</h2>
+          <p class="step-desc">Set the transistor's physical dimensions and threshold voltage.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Length L (nm)</label><input type="number" id="gate_length_nm" value="180"></div>
+            <div class="field"><label class="field-label">Width W (µm)</label><input type="number" id="gate_width_um" value="1.0" step="0.1"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Tox (nm)</label><input type="number" id="tox_nm" value="4.0" step="0.1"></div>
+            <div class="field"><label class="field-label">Vth0 (V)</label><input type="number" id="vth0" value="0.4" step="0.01"></div>
+          </div>
+        </section>
+
+        <section class="step-panel" data-step="2">
+          <div class="step-meta">STEP 3 / 5</div>
+          <h2 class="step-title">Operating conditions</h2>
+          <p class="step-desc">Fix the bias points that stay constant while the sweep runs.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Fixed Vgs (V)</label><input type="number" id="fixed_vgs" value="1.8" step="0.1"></div>
+            <div class="field"><label class="field-label">Fixed Vds (V)</label><input type="number" id="fixed_vds" value="1.2" step="0.1"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Fixed Vsb (V)</label><input type="number" id="fixed_vsb" value="0.0" step="0.1"></div>
+            <div class="field"><label class="field-label">Temp (°C)</label><input type="number" id="temp_c" value="27.0" step="1.0"></div>
+          </div>
+        </section>
+
+        <section class="step-panel" data-step="3">
+          <div class="step-meta">STEP 4 / 5</div>
+          <h2 class="step-title">Physics model</h2>
+          <p class="step-desc">Tune second-order effects and toggle which ones apply.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Lambda (CLM)</label><input type="number" id="lambda_param" value="0.05" step="0.01"></div>
+            <div class="field"><label class="field-label">Gamma (body)</label><input type="number" id="gamma" value="0.4" step="0.01"></div>
+          </div>
+          <div style="margin-top: 16px;">
+            <div class="toggle-row"><span>Channel length modulation</span><label class="switch"><input type="checkbox" id="enable_clm" checked><span class="track"></span></label></div>
+            <div class="toggle-row"><span>Body effect</span><label class="switch"><input type="checkbox" id="enable_body_effect" checked><span class="track"></span></label></div>
+            <div class="toggle-row"><span>Velocity saturation</span><label class="switch"><input type="checkbox" id="enable_velocity_saturation"><span class="track"></span></label></div>
+          </div>
+        </section>
+
+        <section class="step-panel" data-step="4">
+          <div class="step-meta">STEP 5 / 5</div>
+          <h2 class="step-title">Review & run</h2>
+          <p class="step-desc">Confirm everything looks right, then run the simulation.</p>
+          <div class="review-grid" id="review-grid"></div>
+        </section>
+
+      </div>
+      <div class="wizard-footer">
+        <button class="btn" id="back-btn" onclick="goStep(-1)" disabled>Back</button>
+        <button class="btn primary" id="next-btn" onclick="handlePrimary()">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="view" id="view-results">
+    <div class="headline-block">
+      <div class="headline-eyebrow">WAVEFORMS</div>
+      <h1 class="headline" style="font-size:22px;">Sweep output</h1>
+    </div>
+
+    <div class="frame results-frame">
+      <div class="frame-tag">FIG. 02</div>
+      <div class="results-header">
+        <div class="results-title" id="results-title">Drain current — <span>empirical engine</span></div>
+        <div class="rstatus" id="status"><span class="dot"></span><span id="status-text">idle</span></div>
+      </div>
+      <div class="results-body">
+        <div class="banner" id="error-banner"></div>
+        <div id="plot"></div>
+      </div>
+      <div class="wizard-footer">
+        <button class="btn" onclick="showView('wizard')">Edit configuration</button>
+        <button class="btn primary" onclick="runSimulation()">Run again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CIRCUITS -->
+  <div class="view" id="view-circuits">
+    <div class="headline-block">
+      <div class="headline-eyebrow">CIRCUIT LAB</div>
+      <h1 class="headline" style="font-size:22px;">Simulate a circuit template</h1>
+      <div class="meta-line">RC, inverter and amplifier templates run in your browser &middot; the netlist solver runs on the backend</div>
+    </div>
+
+    <div class="action-row" id="template-row">
+      <button class="pill-btn primary" data-tmpl="rc" onclick="selectTemplate('rc')">RC low-pass filter</button>
+      <button class="pill-btn" data-tmpl="inverter" onclick="selectTemplate('inverter')">CMOS inverter (VTC)</button>
+      <button class="pill-btn" data-tmpl="cs" onclick="selectTemplate('cs')">Common-source amplifier</button>
+      <button class="pill-btn" data-tmpl="netlist" onclick="selectTemplate('netlist')">Netlist Solver (MNA)</button>
+    </div>
+
+    <div class="frame wizard-frame" style="max-width:640px; margin-bottom:22px;">
+      <div class="frame-tag">SPEC-05</div>
+      <div class="wizard-body" style="min-height:auto;">
+
+        <div class="tmpl-fields" id="fields-rc">
+          <div class="step-meta">RC LOW-PASS FILTER</div>
+          <h2 class="step-title">Filter parameters</h2>
+          <p class="step-desc">Single-pole RC low-pass. Sweeps frequency and reports the cutoff.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">Resistance R (kΩ)</label><input type="number" id="rc_r" value="10" step="0.1"></div>
+            <div class="field"><label class="field-label">Capacitance C (nF)</label><input type="number" id="rc_c" value="100" step="1"></div>
+          </div>
+        </div>
+
+        <div class="tmpl-fields" id="fields-inverter" style="display:none;">
+          <div class="step-meta">CMOS INVERTER</div>
+          <h2 class="step-title">Transistor parameters</h2>
+          <p class="step-desc">Square-law NMOS/PMOS model, solved numerically. Reports the switching threshold.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">VDD (V)</label><input type="number" id="inv_vdd" value="1.8" step="0.1"></div>
+            <div class="field"><label class="field-label">Vthn (V)</label><input type="number" id="inv_vthn" value="0.4" step="0.01"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="field-label">|Vthp| (V)</label><input type="number" id="inv_vthp" value="0.4" step="0.01"></div>
+            <div class="field"><label class="field-label">Kn (mA/V²)</label><input type="number" id="inv_kn" value="0.2" step="0.01"></div>
+          </div>
+          <div class="field">
+            <label class="field-label">Kp (mA/V²)</label>
+            <input type="number" id="inv_kp" value="0.2" step="0.01">
+          </div>
+        </div>
+
+        <div class="tmpl-fields" id="fields-cs" style="display:none;">
+          <div class="step-meta">COMMON-SOURCE AMPLIFIER</div>
+          <h2 class="step-title">Small-signal parameters</h2>
+          <p class="step-desc">Sweeps drain resistance and reports gain at your configured point.</p>
+          <div class="field-row">
+            <div class="field"><label class="field-label">gm (mA/V)</label><input type="number" id="cs_gm" value="5" step="0.1"></div>
+            <div class="field"><label class="field-label">RD (kΩ)</label><input type="number" id="cs_rd" value="5" step="0.1"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="field-label">ro (kΩ)</label><input type="number" id="cs_ro" value="50" step="1"></div>
+            <div class="field"><label class="field-label">Rs degeneration (kΩ)</label><input type="number" id="cs_rs" value="0" step="0.1"></div>
+          </div>
+        </div>
+
+                <div class="tmpl-fields" id="fields-netlist" style="display:none;">
+          <div class="step-meta">NETLIST SOLVER</div>
+          <h2 class="step-title">SPICE-style netlist</h2>
+          <p class="step-desc">Solved by the backend MNA solver (Newton-Raphson when MOSFETs are present). Linear elements validated against ngspice. Elements: <code>V</code> <code>I</code> <code>R</code> as <code>name node_p node_n value</code>; MOSFET as <code>M1 drain gate source bulk NMOS|PMOS W=1 L=180</code> (W in µm, L in nm, optional). Node 0 is ground; an <code>I</code> source pushes current from node_p through itself into node_n. Add <code>.dc Vin 0 1.8 0.05</code> to sweep a source and plot the result.</p>
+          <div class="field">
+            <textarea id="netlist_input" rows="6" style="width:100%; font-family: var(--font-mono); font-size: 13px; padding: 9px 11px; background: var(--paper-2); border: 1.5px solid var(--line-strong);">Vin 1 0 5
+R1 1 2 1000
+R2 2 0 2000</textarea>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('inverter')">Example: CMOS inverter sweep</button>
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('cs')">Example: common-source sweep</button>
+          </div>
+          <div id="netlist-error" style="display:none; color: var(--accent); font-family: var(--font-mono); font-size: 12px; margin-top: 8px;"></div>
+        </div>
+      </div>
+      <div class="wizard-footer">
+        <div class="meta-line" id="tmpl-hint">Configure parameters, then simulate.</div>
+        <button class="btn primary" onclick="simulateCircuit()">Simulate circuit</button>
+      </div>
+    </div>
+
+    <div class="frame results-frame" id="circuit-results" style="display:none;">
+      <div class="frame-tag">FIG. 03</div>
+      <div class="results-header">
+        <div class="results-title" id="circuit-results-title">Result</div>
+        <div class="rstatus live"><span class="dot"></span><span>computed</span></div>
+      </div>
+      <div class="metric-strip" id="circuit-values"></div>
+      <div class="results-body">
+        <div id="circuit-plot" style="width:100%; height:400px;"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showView(name){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.toptab[data-nav]').forEach(n => n.classList.toggle('active', n.dataset.nav === name));
+}
+
+const TOTAL_STEPS = 5;
+let currentStep = 0;
+
+function getFloatVal(id){ return parseFloat(document.getElementById(id).value); }
+function getBoolVal(id){ return document.getElementById(id).checked; }
+
+function renderRuler(){
+  const ruler = document.getElementById('step-ruler');
+  let html = '';
+  for(let i = 0; i < TOTAL_STEPS; i++){
+    const cls = i < currentStep ? 'done' : (i === currentStep ? 'now' : '');
+    html += `<div class="tick ${cls}">0${i+1}</div>`;
+  }
+  ruler.innerHTML = html;
+}
+
+function renderReview(){
+  const rows = [
+    ['Engine', document.getElementById('engine_type').value],
+    ['Sweep variable', document.getElementById('sweep_param').value.toUpperCase()],
+    ['Length L', getFloatVal('gate_length_nm') + ' nm'],
+    ['Width W', getFloatVal('gate_width_um') + ' µm'],
+    ['Tox', getFloatVal('tox_nm') + ' nm'],
+    ['Vth0', getFloatVal('vth0') + ' V'],
+    ['Fixed Vgs', getFloatVal('fixed_vgs') + ' V'],
+    ['Fixed Vds', getFloatVal('fixed_vds') + ' V'],
+    ['Fixed Vsb', getFloatVal('fixed_vsb') + ' V'],
+    ['Temp', getFloatVal('temp_c') + ' °C'],
+    ['Lambda', getFloatVal('lambda_param')],
+    ['Gamma', getFloatVal('gamma')],
+    ['CLM', getBoolVal('enable_clm') ? 'on' : 'off'],
+    ['Body effect', getBoolVal('enable_body_effect') ? 'on' : 'off'],
+    ['Velocity sat.', getBoolVal('enable_velocity_saturation') ? 'on' : 'off'],
+  ];
+  document.getElementById('review-grid').innerHTML = rows.map(
+    ([label, val]) => `<div class="review-item"><span>${label}</span><span>${val}</span></div>`
+  ).join('');
+}
+
+function updateWizardUI(){
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', Number(p.dataset.step) === currentStep));
+  renderRuler();
+  document.getElementById('back-btn').disabled = currentStep === 0;
+  document.getElementById('next-btn').textContent = currentStep === TOTAL_STEPS - 1 ? 'Run simulation' : 'Continue';
+  if(currentStep === TOTAL_STEPS - 1) renderReview();
+}
+
+function goStep(delta){
+  currentStep = Math.max(0, Math.min(TOTAL_STEPS - 1, currentStep + delta));
+  updateWizardUI();
+}
+
+function handlePrimary(){
+  if(currentStep === TOTAL_STEPS - 1) runSimulation();
+  else goStep(1);
+}
+
+function setStatus(state, text){
+  const el = document.getElementById('status');
+  el.classList.toggle('live', state === 'live');
+  document.getElementById('status-text').textContent = text;
+}
+function showError(msg){ const b = document.getElementById('error-banner'); b.textContent = msg; b.classList.add('show'); }
+function hideError(){ document.getElementById('error-banner').classList.remove('show'); }
+
+async function runSimulation(){
+  const engineType = document.getElementById("engine_type").value;
+  const sweepParam = document.getElementById("sweep_param").value;
+
+  showView('results');
+  document.getElementById('results-title').innerHTML = `Drain current — <span>${engineType} engine</span>`;
+  hideError();
+  setStatus('busy', 'running…');
+
+  const payload = {
+    engine_type: engineType,
+    sweep_param: sweepParam,
+    gate_length_nm: getFloatVal("gate_length_nm"),
+    gate_width_um: getFloatVal("gate_width_um"),
+    tox_nm: getFloatVal("tox_nm"),
+    vth0: getFloatVal("vth0"),
+    gamma: getFloatVal("gamma"),
+    lambda_param: getFloatVal("lambda_param"),
+    enable_body_effect: getBoolVal("enable_body_effect"),
+    enable_clm: getBoolVal("enable_clm"),
+    enable_velocity_saturation: getBoolVal("enable_velocity_saturation"),
+    fixed_vgs: getFloatVal("fixed_vgs"),
+    fixed_vds: getFloatVal("fixed_vds"),
+    fixed_vsb: getFloatVal("fixed_vsb"),
+    temp_c: getFloatVal("temp_c")
+  };
+
+  try{
+    const response = await fetch("http://127.0.0.1:8000/api/v1/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if(!response.ok) throw new Error(`Server responded with ${response.status}`);
+
+    const res = await response.json();
+    const data = res.data;
+
+    // x axis follows the swept variable (the empirical engine always sweeps Vgs)
+    const SWEEP_AXES = {
+      vgs:  ['vgs',    'Gate voltage Vgs (V)'],
+      vds:  ['vds',    'Drain voltage Vds (V)'],
+      vsb:  ['vsb',    'Source-bulk voltage Vsb (V)'],
+      temp: ['temp_c', 'Temperature (°C)']
+    };
+    const [xKey, xLabel] = engineType === 'empirical' ? SWEEP_AXES.vgs : (SWEEP_AXES[sweepParam] || SWEEP_AXES.vgs);
+    let xValues = data[xKey] || [];
+    if(xValues.length === 0){
+      setStatus('idle', 'failed');
+      showError('The ' + engineType + ' engine has no ' + sweepParam.toUpperCase() + ' sweep. Use the non-ideal engine for Vsb or temperature sweeps.');
+      return;
+    }
+    let traces = [];
+
+    if (data.id_empirical) {
+      traces.push({
+        x: xValues,
+        y: data.id_empirical.map(val => val * 1000), // convert A to mA
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#b5541f', width: 2 },
+        name: 'Empirical Scaled (mA)'
+      });
+    }
+
+    if (data.id_measured_raw) {
+      traces.push({
+        x: xValues,
+        y: data.id_measured_raw.map(val => val * 1000), // convert A to mA
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#2e6e6a', width: 2, dash: 'dash' },
+        name: 'Raw Silicon Data (mA)'
+      });
+    }
+
+    if (data.id) {
+      traces.push({
+        x: xValues,
+        y: data.id.map(val => val * 1000),
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#b5541f', width: 2 },
+        name: `Id vs ${sweepParam.toUpperCase()}`
+      });
+    }
+
+    const layout = {
+      margin: { t: 20, r: 24, b: 48, l: 56 },
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { family: 'Inter, sans-serif', color: '#7a8094', size: 12 },
+      xaxis: { title: { text: xLabel, font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' },
+      yaxis: { title: { text: 'Drain current Id (mA)', font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' }
+    };
+
+    Plotly.newPlot('plot', traces, layout, { displayModeBar: false, responsive: true });
+    setStatus('live', 'up to date');
+  }
+  catch(err){
+    setStatus('idle', 'failed');
+    showError("Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running, then run again.");
+  }
+}
+
+/* ===== Circuit templates (Path A: curated topologies, real equations, computed client-side) ===== */
+
+let currentTemplate = 'rc';
+
+function selectTemplate(t){
+  currentTemplate = t;
+  document.querySelectorAll('#template-row .pill-btn').forEach(b => b.classList.toggle('primary', b.dataset.tmpl === t));
+  document.querySelectorAll('.tmpl-fields').forEach(f => f.style.display = 'none');
+  document.getElementById('fields-' + t).style.display = 'block';
+  document.getElementById('circuit-results').style.display = 'none';
+}
+
+function simulateCircuit(){
+  const plotDiv = document.getElementById('circuit-plot');
+  try{ Plotly.purge(plotDiv); }catch(e){}
+  plotDiv.innerHTML = '';
+  plotDiv.style.height = '400px';
+  if(currentTemplate === 'rc') simulateRC();
+  else if(currentTemplate === 'inverter') simulateInverter();
+  else if(currentTemplate === 'cs') simulateCS();
+  else if(currentTemplate === 'netlist') simulateNetlist();
+}
+
+function circuitLayout(xTitle, yTitle, logX){
+  return {
+    margin: { t: 16, r: 20, b: 46, l: 56 },
+    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { family: 'Inter, sans-serif', color: '#7a8094', size: 12 },
+    xaxis: { title: { text: xTitle, font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de', type: logX ? 'log' : 'linear' },
+    yaxis: { title: { text: yTitle, font: { color: '#4a5164' } }, tickfont: { color: '#7a8094', family: 'JetBrains Mono, monospace', size: 11 }, gridcolor: '#e4dfd2', zerolinecolor: '#cfd8de' }
+  };
+}
+
+function showCircuitResult(title, rows){
+  document.getElementById('circuit-results').style.display = 'block';
+  document.getElementById('circuit-results-title').textContent = title;
+  document.getElementById('circuit-values').innerHTML = rows.map(([label, val]) => `
+    <div class="metric">
+      <div class="metric-label">${label.toUpperCase()}</div>
+      <div class="metric-value" style="font-size:16px;">${val}</div>
+    </div>
+  `).join('');
+}
+
+function formatFreq(f){
+  if(f >= 1e6) return (f / 1e6).toFixed(2) + ' MHz';
+  if(f >= 1e3) return (f / 1e3).toFixed(2) + ' kHz';
+  return f.toFixed(1) + ' Hz';
+}
+
+// --- RC low-pass filter: exact single-pole transfer function ---
+function simulateRC(){
+  const R = getFloatVal('rc_r') * 1e3;   // ohms
+  const C = getFloatVal('rc_c') * 1e-9;  // farads
+  const fc = 1 / (2 * Math.PI * R * C);
+
+  const N = 120;
+  const fmin = fc / 1000, fmax = fc * 1000;
+  const freqs = [], mags = [];
+  for(let i = 0; i <= N; i++){
+    const logf = Math.log10(fmin) + (i / N) * (Math.log10(fmax) - Math.log10(fmin));
+    const f = Math.pow(10, logf);
+    const mag = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * f * R * C, 2));
+    freqs.push(f);
+    mags.push(20 * Math.log10(mag));
+  }
+
+  const trace = { x: freqs, y: mags, type: 'scatter', mode: 'lines', line: { color: '#b5541f', width: 2 } };
+  Plotly.newPlot('circuit-plot', [trace], circuitLayout('Frequency (Hz)', 'Magnitude (dB)', true), { displayModeBar: false, responsive: true });
+
+  showCircuitResult('RC low-pass filter — magnitude response', [
+    ['Cutoff frequency', formatFreq(fc)],
+    ['R', getFloatVal('rc_r') + ' kΩ'],
+    ['C', getFloatVal('rc_c') + ' nF']
+  ]);
+}
+
+// --- CMOS inverter: square-law NMOS/PMOS, KCL solved by bisection per Vin ---
+function simulateInverter(){
+  const VDD = getFloatVal('inv_vdd');
+  const Vthn = getFloatVal('inv_vthn');
+  const Vthp = getFloatVal('inv_vthp'); // magnitude
+  const Kn = getFloatVal('inv_kn');
+  const Kp = getFloatVal('inv_kp');
+
+  function inCurrent(Vin, Vout){
+    const Vgs = Vin, Vds = Vout;
+    if(Vgs <= Vthn) return 0;
+    if(Vds < (Vgs - Vthn)) return Kn * (2 * (Vgs - Vthn) * Vds - Vds * Vds);
+    return Kn * (Vgs - Vthn) * (Vgs - Vthn);
+  }
+  function ipCurrent(Vin, Vout){
+    const Vsg = VDD - Vin, Vsd = VDD - Vout;
+    if(Vsg <= Vthp) return 0;
+    if(Vsd < (Vsg - Vthp)) return Kp * (2 * (Vsg - Vthp) * Vsd - Vsd * Vsd);
+    return Kp * (Vsg - Vthp) * (Vsg - Vthp);
+  }
+  function solveVout(Vin){
+    let lo = 0, hi = VDD;
+    for(let it = 0; it < 60; it++){
+      const mid = (lo + hi) / 2;
+      const f = inCurrent(Vin, mid) - ipCurrent(Vin, mid);
+      if(f > 0) hi = mid; else lo = mid;
+    }
+    return (lo + hi) / 2;
+  }
+
+  const N = 150;
+  const vins = [], vouts = [];
+  for(let i = 0; i <= N; i++){
+    const vin = (i / N) * VDD;
+    vins.push(vin);
+    vouts.push(solveVout(vin));
+  }
+
+  let vm = VDD / 2, bestDiff = Infinity;
+  for(let i = 0; i < vins.length; i++){
+    const diff = Math.abs(vouts[i] - VDD / 2);
+    if(diff < bestDiff){ bestDiff = diff; vm = vins[i]; }
+  }
+
+  const trace = { x: vins, y: vouts, type: 'scatter', mode: 'lines', line: { color: '#b5541f', width: 2 } };
+  Plotly.newPlot('circuit-plot', [trace], circuitLayout('Vin (V)', 'Vout (V)', false), { displayModeBar: false, responsive: true });
+
+  showCircuitResult('CMOS inverter — voltage transfer characteristic', [
+    ['Switching threshold VM', vm.toFixed(3) + ' V'],
+    ['VDD', VDD + ' V'],
+    ['Kn / Kp', Kn + ' / ' + Kp + ' mA/V²']
+  ]);
+}
+
+// --- Common-source amplifier: small-signal gain vs RD ---
+function simulateCS(){
+  const gm = getFloatVal('cs_gm') * 1e-3; // A/V
+  const RD0 = getFloatVal('cs_rd') * 1e3; // ohms
+  const ro = getFloatVal('cs_ro') * 1e3;
+  const Rs = getFloatVal('cs_rs') * 1e3;
+
+  function gain(RD){
+    const parallel = (RD * ro) / (RD + ro);
+    return -gm * parallel / (1 + gm * Rs);
+  }
+
+  const N = 80;
+  const rdMax = (RD0 * 3) || 10000;
+  const rds = [], gains = [];
+  for(let i = 1; i <= N; i++){
+    const rd = (i / N) * rdMax;
+    rds.push(rd / 1e3); // kΩ for axis
+    gains.push(Math.abs(gain(rd)));
+  }
+  const avAtConfig = gain(RD0);
+
+  const trace = { x: rds, y: gains, type: 'scatter', mode: 'lines', line: { color: '#b5541f', width: 2 } };
+  Plotly.newPlot('circuit-plot', [trace], circuitLayout('RD (kΩ)', '|Av| (V/V)', false), { displayModeBar: false, responsive: true });
+
+  showCircuitResult('Common-source amplifier — gain vs RD', [
+    ['Voltage gain Av', avAtConfig.toFixed(2) + ' V/V'],
+    ['At RD', getFloatVal('cs_rd') + ' kΩ'],
+    ['gm', getFloatVal('cs_gm') + ' mA/V']
+  ]);
+}
+
+const NETLIST_EXAMPLES = {
+  inverter: [
+    '* CMOS inverter: sweep the input and watch the output',
+    'Vdd 1 0 1.8',
+    'Vin 2 0 0',
+    'M1 3 2 0 0 NMOS',
+    'M2 3 2 1 1 PMOS',
+    '.dc Vin 0 1.8 0.05'
+  ].join('\n'),
+  cs: [
+    '* Common-source stage: sweep the gate voltage',
+    'Vdd 1 0 1.8',
+    'Vg 2 0 0',
+    'R1 1 3 5000',
+    'M1 3 2 0 0 NMOS W=2 L=180',
+    '.dc Vg 0 1.8 0.025'
+  ].join('\n')
+};
+
+function loadNetlistExample(name){
+  document.getElementById('netlist_input').value = NETLIST_EXAMPLES[name];
+  document.getElementById('netlist-error').style.display = 'none';
+}
+
+// Dashboard shortcut: jump to the Circuits tab, load an example netlist and run it
+function openNetlistExample(name){
+  showView('circuits');
+  selectTemplate('netlist');
+  loadNetlistExample(name);
+  simulateCircuit();
+}
+
+const SWEEP_COLORS = ['#b5541f', '#2f6f6b', '#4a5164', '#8a6d3b', '#7a4e8c', '#3f7cac'];
+
+function renderNetlistSweep(data){
+  const xs = data.sweep.values;
+  const src = data.sweep.source;
+  const xUnit = src[0].toUpperCase() === 'I' ? 'A' : 'V';
+  const xTitle = src + ' (' + xUnit + ')';
+
+  const volt = [], cur = [];
+  Object.entries(data.series).forEach(([k, ys]) => {
+    if(k.startsWith('V(')){
+      // a node that just mirrors the swept voltage source is a straight y = x line; skip it
+      if(xUnit === 'V' && ys.every((y, i) => Math.abs(y - xs[i]) < 1e-9)) return;
+      volt.push([k, ys]);
+    } else if(k.startsWith('Id(')){
+      cur.push([k, ys]);
+    }
+  });
+  if(volt.length === 0){
+    Object.entries(data.series).forEach(([k, ys]) => { if(k.startsWith('V(')) volt.push([k, ys]); });
+  }
+
+  const traces = [];
+  let c = 0;
+  volt.forEach(([k, ys]) => {
+    traces.push({ x: xs, y: ys, name: k, type: 'scatter', mode: 'lines',
+                  line: { color: SWEEP_COLORS[c++ % SWEEP_COLORS.length], width: 2 }, xaxis: 'x', yaxis: 'y' });
+  });
+  cur.forEach(([k, ys]) => {
+    traces.push({ x: xs, y: ys.map(v => v * 1e3), name: k + ' (mA)', type: 'scatter', mode: 'lines',
+                  line: { color: SWEEP_COLORS[c++ % SWEEP_COLORS.length], width: 2 }, xaxis: 'x2', yaxis: 'y2' });
+  });
+
+  const base = circuitLayout(xTitle, 'Voltage (V)', false);
+  let layout;
+  if(cur.length){
+    const common = { tickfont: base.xaxis.tickfont, gridcolor: base.xaxis.gridcolor, zerolinecolor: base.xaxis.zerolinecolor };
+    const ytitle = txt => ({ text: txt, font: base.yaxis.title.font });
+    layout = {
+      margin: { t: 44, r: 20, b: 46, l: 64 },
+      paper_bgcolor: base.paper_bgcolor, plot_bgcolor: base.plot_bgcolor, font: base.font,
+      showlegend: true, legend: { orientation: 'h', y: 1.1 },
+      xaxis:  Object.assign({}, common, { domain: [0, 1], anchor: 'y', matches: 'x2', showticklabels: false }),
+      xaxis2: Object.assign({}, common, { domain: [0, 1], anchor: 'y2', title: base.xaxis.title }),
+      yaxis:  Object.assign({}, common, { domain: [0.58, 1], anchor: 'x', title: ytitle('Voltage (V)') }),
+      yaxis2: Object.assign({}, common, { domain: [0, 0.42], anchor: 'x2', title: ytitle('Drain current (mA)') })
+    };
+  } else {
+    layout = Object.assign({}, base, { margin: { t: 44, r: 20, b: 46, l: 64 }, showlegend: true, legend: { orientation: 'h', y: 1.1 } });
+  }
+
+  const plotDiv = document.getElementById('circuit-plot');
+  plotDiv.style.height = cur.length ? '560px' : '400px';
+  Plotly.newPlot('circuit-plot', traces, layout, { displayModeBar: false, responsive: true });
+
+  const num = v => String(Number(v.toPrecision(6)));
+  const rows = [
+    ['Sweep', src + ' ' + num(data.sweep.start) + ' → ' + num(data.sweep.stop) + ' ' + xUnit],
+    ['Points', String(xs.length)]
+  ];
+  if(data.max_iterations > 1) rows.push(['Newton iterations (max per point)', String(data.max_iterations)]);
+
+  // where a voltage crosses the sweep variable (e.g. inverter switching threshold VM)
+  if(xUnit === 'V'){
+    volt.forEach(([k, ys]) => {
+      for(let i = 0; i < xs.length - 1; i++){
+        const d0 = ys[i] - xs[i], d1 = ys[i + 1] - xs[i + 1];
+        if(d0 * d1 < 0){
+          const xc = xs[i] + (xs[i + 1] - xs[i]) * d0 / (d0 - d1);
+          rows.push([k + ' = ' + src + ' at', xc.toFixed(3) + ' V']);
+          break;
+        }
+      }
+    });
+  }
+
+  const nr = data.max_iterations > 1 ? ' (Newton-Raphson)' : '';
+  showCircuitResult('Netlist solver — DC sweep of ' + src + nr, rows);
+}
+
+async function simulateNetlist(){
+  const netlist = document.getElementById('netlist_input').value;
+  const errorDiv = document.getElementById('netlist-error');
+  errorDiv.style.display = 'none';
+
+  try{
+    const response = await fetch("http://127.0.0.1:8000/api/v1/solve_circuit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ netlist: netlist })
+    });
+    const data = await response.json();
+
+    if(!response.ok){
+      errorDiv.textContent = data.detail;
+      errorDiv.style.display = 'block';
+      document.getElementById('circuit-results').style.display = 'none';
+      return;
+    }
+
+    if(data.mode === 'dc_sweep'){
+      renderNetlistSweep(data);
+      return;
+    }
+
+    document.getElementById('circuit-plot').innerHTML =
+      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — add a .dc line to sweep a source and plot it.</p>';
+
+    const rows = Object.entries(data.results).map(([k, v]) =>
+      [k, k.startsWith('I') ? v.toExponential(4) + ' A' : v.toFixed(6) + ' V']);
+    const nr = data.iterations > 1 ? ` (Newton-Raphson, ${data.iterations} iterations)` : '';
+    showCircuitResult('Netlist solver — DC operating point' + nr, rows);
+  }
+  catch(err){
+    const unreachable = err instanceof TypeError && /fetch/i.test(err.message);
+    errorDiv.textContent = unreachable
+      ? "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running."
+      : "Unexpected error: " + err.message;
+    errorDiv.style.display = 'block';
+  }
+}
+updateWizardUI();
+</script>
+
+</body>
+</html>

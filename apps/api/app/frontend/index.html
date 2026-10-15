@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -515,6 +515,8 @@ R2 2 0 2000</textarea>
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="pill-btn" onclick="loadNetlistExample('inverter')">Example: CMOS inverter sweep</button>
             <button type="button" class="pill-btn" onclick="loadNetlistExample('cs')">Example: common-source sweep</button>
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('rc')">Example: RC low-pass (AC)</button>
+            <button type="button" class="pill-btn" onclick="loadNetlistExample('csac')">Example: common-source AC</button>
           </div>
           <div id="netlist-error" style="display:none; color: var(--accent); font-family: var(--font-mono); font-size: 12px; margin-top: 8px;"></div>
         </div>
@@ -640,7 +642,7 @@ async function runSimulation(){
   };
 
   try{
-    const response = await fetch("http://127.0.0.1:8000/api/v1/simulate", {
+    const response = await fetch("/api/v1/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -712,7 +714,7 @@ async function runSimulation(){
   }
   catch(err){
     setStatus('idle', 'failed');
-    showError("Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running, then run again.");
+    showError("Couldn't reach the backend. Make sure the AnalogSim server is running, then try again.");
   }
 }
 
@@ -761,6 +763,7 @@ function showCircuitResult(title, rows){
 }
 
 function formatFreq(f){
+  if(f >= 1e9) return (f / 1e9).toFixed(2) + ' GHz';
   if(f >= 1e6) return (f / 1e6).toFixed(2) + ' MHz';
   if(f >= 1e3) return (f / 1e3).toFixed(2) + ' kHz';
   return f.toFixed(1) + ' Hz';
@@ -895,6 +898,22 @@ const NETLIST_EXAMPLES = {
     'R1 1 3 5000',
     'M1 3 2 0 0 NMOS W=2 L=180',
     '.dc Vg 0 1.8 0.025'
+  ].join('\n'),
+  rc: [
+    '* RC low-pass: corner at 1/(2*pi*R*C) = 1.59 kHz',
+    'Vin 1 0 0 AC 1',
+    'R1 1 2 1k',
+    'C1 2 0 100n',
+    '.ac dec 20 10 1meg'
+  ].join('\n'),
+  csac: [
+    '* Common-source amp, small-signal AC. Gain = -gm*(Rd||ro); Cgd + Rs make a Miller pole',
+    'Vdd 1 0 1.8',
+    'Vin 4 0 0.8 AC 1',
+    'Rs 4 2 100k',
+    'Rd 1 3 10k',
+    'M1 3 2 0 0 NMOS W=2 L=180 CGD=1p',
+    '.ac dec 20 10 1g'
   ].join('\n')
 };
 
@@ -991,13 +1010,74 @@ function renderNetlistSweep(data){
   showCircuitResult('Netlist solver — DC sweep of ' + src + nr, rows);
 }
 
+function renderNetlistAc(data){
+  const f = data.sweep.freqs;
+  const entries = Object.entries(data.series).filter(([k]) => k.startsWith('V('));
+  // drop supply rails (no AC signal) and, when there is something else to show, the input node (flat 0 dB)
+  let nodes = entries.filter(([k, s]) => Math.max(...s.mag) > 1e-9);
+  const nonInput = nodes.filter(([k, s]) => !s.db.every(d => Math.abs(d) < 1e-6));
+  if(nonInput.length) nodes = nonInput;
+
+  const unwrap = ph => { const out = [ph[0]]; for(let i = 1; i < ph.length; i++){
+    let d = ph[i] - ph[i - 1]; while(d > 180) d -= 360; while(d < -180) d += 360; out.push(out[i - 1] + d);
+  } return out; };
+
+  const traces = [];
+  nodes.forEach(([k, s], i) => {
+    const color = SWEEP_COLORS[i % SWEEP_COLORS.length];
+    traces.push({ x: f, y: s.db, name: k, type: 'scatter', mode: 'lines', line: { color, width: 2 }, xaxis: 'x', yaxis: 'y' });
+    traces.push({ x: f, y: unwrap(s.phase_deg), name: k + ' phase', showlegend: false, type: 'scatter', mode: 'lines', line: { color, width: 2 }, xaxis: 'x2', yaxis: 'y2' });
+  });
+
+  const base = circuitLayout('Frequency (Hz)', 'Gain (dB)', true);
+  const common = { tickfont: base.xaxis.tickfont, gridcolor: base.xaxis.gridcolor, zerolinecolor: base.xaxis.zerolinecolor };
+  const ytitle = txt => ({ text: txt, font: base.yaxis.title.font });
+  const layout = {
+    margin: { t: 44, r: 20, b: 46, l: 64 },
+    paper_bgcolor: base.paper_bgcolor, plot_bgcolor: base.plot_bgcolor, font: base.font,
+    showlegend: true, legend: { orientation: 'h', y: 1.1 },
+    xaxis:  Object.assign({}, common, { type: 'log', domain: [0, 1], anchor: 'y', matches: 'x2', showticklabels: false }),
+    xaxis2: Object.assign({}, common, { type: 'log', domain: [0, 1], anchor: 'y2', title: base.xaxis.title }),
+    yaxis:  Object.assign({}, common, { domain: [0.58, 1], anchor: 'x', title: ytitle('Gain (dB)') }),
+    yaxis2: Object.assign({}, common, { domain: [0, 0.42], anchor: 'x2', title: ytitle('Phase (deg)') })
+  };
+  document.getElementById('circuit-plot').style.height = '560px';
+  Plotly.newPlot('circuit-plot', traces, layout, { displayModeBar: false, responsive: true });
+
+  // first frequency where the curve crosses a level (log-interpolated)
+  const crossing = (db, level) => {
+    for(let i = 0; i < db.length - 1; i++){
+      if((db[i] - level) * (db[i + 1] - level) < 0){
+        const t = (level - db[i]) / (db[i + 1] - db[i]);
+        return Math.pow(10, Math.log10(f[i]) + t * (Math.log10(f[i + 1]) - Math.log10(f[i])));
+      }
+    }
+    return null;
+  };
+
+  const rows = [['Sweep', formatFreq(data.sweep.start) + ' → ' + formatFreq(data.sweep.stop)]];
+  if(nodes.length){
+    const [k, s] = nodes[nodes.length - 1];
+    rows.push([k + ' low-frequency gain', (Math.abs(s.db[0]) < 0.005 ? 0 : s.db[0]).toFixed(2) + ' dB']);
+    const f3 = crossing(s.db, s.db[0] - 3.0103);
+    rows.push([k + ' −3 dB frequency', f3 ? formatFreq(f3) : 'not reached in range']);
+    if(s.db[0] > 0){
+      const fu = crossing(s.db, 0);
+      rows.push([k + ' unity-gain frequency', fu ? formatFreq(fu) : 'not reached in range']);
+    }
+  }
+  const op = data.operating_point || {};
+  Object.entries(op).filter(([k]) => k.startsWith('Id(')).forEach(([k, v]) => rows.push([k + ' (DC bias)', (v * 1e3).toFixed(4) + ' mA']));
+  showCircuitResult('Netlist solver — small-signal AC analysis', rows);
+}
+
 async function simulateNetlist(){
   const netlist = document.getElementById('netlist_input').value;
   const errorDiv = document.getElementById('netlist-error');
   errorDiv.style.display = 'none';
 
   try{
-    const response = await fetch("http://127.0.0.1:8000/api/v1/solve_circuit", {
+    const response = await fetch("/api/v1/solve_circuit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ netlist: netlist })
@@ -1015,9 +1095,13 @@ async function simulateNetlist(){
       renderNetlistSweep(data);
       return;
     }
+    if(data.mode === 'ac'){
+      renderNetlistAc(data);
+      return;
+    }
 
     document.getElementById('circuit-plot').innerHTML =
-      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — add a .dc line to sweep a source and plot it.</p>';
+      '<p style="font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 20px;">Single operating-point solve — add a .dc line to sweep a source, or an .ac line (with an AC source) for a frequency response.</p>';
 
     const rows = Object.entries(data.results).map(([k, v]) =>
       [k, k.startsWith('I') ? v.toExponential(4) + ' A' : v.toFixed(6) + ' V']);
@@ -1027,7 +1111,7 @@ async function simulateNetlist(){
   catch(err){
     const unreachable = err instanceof TypeError && /fetch/i.test(err.message);
     errorDiv.textContent = unreachable
-      ? "Couldn't reach the backend at 127.0.0.1:8000 — make sure the server is running."
+      ? "Couldn't reach the backend. Make sure the AnalogSim server is running."
       : "Unexpected error: " + err.message;
     errorDiv.style.display = 'block';
   }
