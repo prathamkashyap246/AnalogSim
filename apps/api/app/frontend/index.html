@@ -1077,7 +1077,7 @@ async function simulateNetlist(){
   errorDiv.style.display = 'none';
 
   try{
-    const response = await fetch("/api/v1/solve_circuit", {
+    const response = await fetch("http://127.0.0.1:8000/api/v1/solve_circuit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ netlist: netlist })
