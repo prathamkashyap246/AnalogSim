@@ -24,6 +24,66 @@ low-frequency gain, -3 dB frequency, and unity-gain frequency.
 
 ![AC analysis of a common-source amplifier: 10.67 dB gain, -3 dB at 3.45 MHz](docs/bode-common-source.png)
 
+## Engines at a glance
+
+AnalogSim has two independent paths. The **device lab** answers "what does one transistor do?" with three
+engines of increasing realism. The **circuit solver** answers "what does a whole circuit do?" and reuses the
+non-ideal transistor model inside it.
+
+```mermaid
+flowchart TD
+    UI["Browser UI<br/>index.html + Plotly"] --> API["FastAPI<br/>main.py"]
+
+    API -->|"POST /api/v1/simulate<br/>one transistor, one swept variable"| LAB
+    API -->|"POST /api/v1/solve_circuit<br/>netlist text"| SOLVER
+
+    subgraph LAB["Device lab: drain current of a single MOSFET"]
+        direction TB
+        ID["Ideal engine<br/>textbook square law"]
+        NI["Non-ideal engine<br/>square law + real effects"]
+        EM["Empirical engine<br/>interpolates measured data"]
+    end
+
+    subgraph SOLVER["Circuit solver: many elements solved together"]
+        direction TB
+        PARSE["Netlist parser"] --> MNA["Modified Nodal Analysis<br/>matrix A x = z"]
+        MNA --> OP["Operating point and DC sweep<br/>Newton-Raphson"]
+        MNA --> AC["Small-signal AC<br/>complex system (G + jwC) x = b"]
+    end
+
+    NI -.->|"same MOSFET model"| OP
+    EM --> MEAS[("PostgreSQL<br/>measurement_data")]
+    API --> RUNS[("PostgreSQL<br/>simulation_runs")]
+```
+
+### How the three device engines differ
+
+```mermaid
+flowchart LR
+    subgraph EQ["Equation-based"]
+        direction LR
+        I["Ideal<br/>constant Vth<br/>triode + saturation only"] -->|"adds body effect, channel-length<br/>modulation, temperature,<br/>optional velocity saturation"| N["Non-ideal<br/>also reports gm, gds, ron"]
+    end
+    subgraph DD["Data-driven"]
+        direction LR
+        M[("Measured Id-Vgs<br/>PostgreSQL")] -->|"interpolate, then scale for<br/>W, L and short-channel effects"| E["Empirical<br/>returns scaled and raw curves"]
+    end
+    N ==>|"called on every Newton iteration"| C["Circuit solver"]
+```
+
+| | Ideal | Non-ideal | Empirical |
+|---|---|---|---|
+| Basis | Square-law equations | Square-law plus second-order effects | Interpolated measured data |
+| Threshold voltage | Constant | Shifts with source-body voltage (body effect) | Not modelled; comes from the data |
+| Channel-length modulation | No | Yes, in saturation only | Only as present in the data |
+| Temperature | No | Mobility scales as (300/T)^1.5 | No |
+| Velocity saturation | No | Optional | Correction factor when L < 250 nm |
+| Sweep variable | Vgs or Vds | Vgs, Vds, Vsb or temperature | Vgs |
+| Outputs | Id | Id, Vth, gm, gds, ron | Scaled Id and raw measured Id |
+| Needs the database | No | No | Yes |
+| Used by the circuit solver | No | **Yes** | No |
+| Best for | Textbook baseline | Realistic device curves and circuits | Comparing against silicon data |
+
 ## Netlist syntax
 
 ```
