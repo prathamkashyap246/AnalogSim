@@ -642,7 +642,7 @@ async function runSimulation(){
   };
 
   try{
-    const response = await fetch("/api/v1/simulate", {
+    const response = await fetch("http://127.0.0.1:8000/api/v1/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -753,6 +753,9 @@ function circuitLayout(xTitle, yTitle, logX){
 
 function showCircuitResult(title, rows){
   document.getElementById('circuit-results').style.display = 'block';
+  document.getElementById('circuit-plot').style.height = '400px';
+  const plotDiv = document.getElementById('circuit-plot');
+  if(plotDiv && plotDiv.data) Plotly.Plots.resize(plotDiv);   // the card was hidden when the plot was drawn
   document.getElementById('circuit-results-title').textContent = title;
   document.getElementById('circuit-values').innerHTML = rows.map(([label, val]) => `
     <div class="metric">
