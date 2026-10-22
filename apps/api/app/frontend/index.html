@@ -910,11 +910,11 @@ const NETLIST_EXAMPLES = {
     '.ac dec 20 10 1meg'
   ].join('\n'),
   csac: [
-    '* Common-source amp, small-signal AC. Gain = -gm*(Rd||ro); Cgd + Rs make a Miller pole',
+    '* Common-source amp, saturation bias; Rs + Cgd create a Miller pole',
     'Vdd 1 0 1.8',
     'Vin 4 0 0.8 AC 1',
-    'Rs 4 2 100k',
-    'Rd 1 3 10k',
+    'Rs 4 2 10k',
+    'Rd 1 3 2k',
     'M1 3 2 0 0 NMOS W=2 L=180 CGD=1p',
     '.ac dec 20 10 1g'
   ].join('\n')
