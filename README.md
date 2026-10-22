@@ -22,6 +22,8 @@ temperature-dependent mobility).
 The web page plots DC sweeps (e.g. a CMOS inverter voltage-transfer curve) and AC results as a Bode plot with
 low-frequency gain, -3 dB frequency, and unity-gain frequency.
 
+![AC analysis of a common-source amplifier: 10.67 dB gain, -3 dB at 3.45 MHz](docs/bode-common-source.png)
+
 ## Netlist syntax
 
 ```
@@ -52,16 +54,24 @@ M2 3 2 1 1 PMOS                         .ac dec 20 10 1meg
 
 ## Run it
 
-```bash
-cd apps/api
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+Requires Python 3.10+ and a running PostgreSQL server. The API creates its tables on startup, so it will not
+start without a reachable database. Create an empty database named `analogsim` first.
+
+```powershell
+cd apps\api
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-cp ../../.env.example .env                             # then set DATABASE_URL (Postgres)
-uvicorn app.main:app --host 127.0.0.1 --port 8000      # Windows: ./start_api.ps1
+copy ..\..\.env.example .env         # macOS/Linux: cp ../../.env.example .env
+# edit .env and set DATABASE_URL
+python seed_data.py                  # sample "measured" data for the empirical engine
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
+If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first.
+
 Then open `apps/api/app/frontend/index.html` in a browser (it talks to `http://127.0.0.1:8000`).
-The netlist solver needs no database data; Postgres is used by the device-lab runs and the empirical engine.
+The netlist solver does not read any data from the database; it only needs the server to be able to start.
 
 API: `POST /api/v1/solve_circuit` with `{"netlist": "..."}` returns `mode: "op" | "dc_sweep" | "ac"`;
 `POST /api/v1/simulate` runs the single-device engines.
@@ -103,6 +113,10 @@ Cross-check against ngspice (LEVEL 1 MOSFET):
 No inductors, diodes, BJTs, or transient analysis. MOSFET capacitances are user-specified constants
 (`CGS`, `CGD`), not a bias-dependent Meyer model. Nodes are integers, not names. The MOSFET model is a
 long-channel square-law model with first-order corrections, not BSIM.
+
+The "raw silicon data" used by the empirical engine is synthetic: `seed_data.py` generates a noisy square-law
+curve. The interpolation and scaling pipeline is real, but it only reflects actual silicon once you replace the
+seed rows with lab measurements.
 
 ## Legacy
 
