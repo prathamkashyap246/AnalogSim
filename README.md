@@ -1,11 +1,11 @@
 # AnalogSim
 
-A small SPICE-style analog circuit simulator with a web front end, built from first principles in Python/NumPy.
-It solves circuits by **Modified Nodal Analysis (MNA)**, handles nonlinear MOSFETs with **Newton-Raphson**, and
+AnalogSim is a small SPICE-style analog circuit simulator with a web front end, built from first principles of Circuit Theory and Semiconductor Device Physics in Python/NumPy.
+It solves circuits by **Modified Nodal Analysis (MNA)**, handles nonlinear MOSFETs with **Newton-Raphson Method for approximation**, and
 runs **DC operating point, DC sweep, and small-signal AC** analyses. Results are cross-checked against **ngspice**.
 
-It also keeps a device-level lab: single-MOSFET I-V sweeps at three model fidelities (ideal, non-ideal, and
-empirical data from a Postgres database).
+It also keeps a device-level lab: single-MOSFET I-V sweeps at three model fidelities or levels : Ideal, Non-ideal, and
+Empirical data from a Postgres database).
 
 ## What it can do
 
@@ -96,6 +96,12 @@ Cross-check against ngspice (LEVEL 1 MOSFET):
 | Non-ideal engine with body effect vs LEVEL 1 | exact match |
 | AC: RC low-pass, 10 Hz-100 MHz | < 1e-6 dB, < 1e-6 deg |
 | AC: common-source amp with Rs and Cgd (Miller pole) | < 1e-5 dB, < 1e-5 deg |
+
+![Common-source AC: AnalogSim vs ngspice](docs/validation-ac-common-source.png)
+![CMOS inverter VTC: AnalogSim vs ngspice](docs/validation-dc-inverter-vtc.png)
+
+Regenerate with `python plot_validation.py` (needs ngspice and `pip install matplotlib`). Both circuits run with
+`LAMBDA=0` and tight ngspice tolerances; see the comments in the script.
 
 ## Design decisions
 
